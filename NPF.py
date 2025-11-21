@@ -1,11 +1,12 @@
 import pandas as pd
 import tkinter as tk
-from tkinter import messagebox
+from tkinter import messagebox, ttk
 import os
 from datetime import datetime
 
-# ФИКСИРОВАННЫЙ ПУТЬ К ФАЙЛУ 1
+# ФИКСИРОВАННЫЕ ПУТИ К ФАЙЛАМ
 FILE1_PATH = r"C:\Users\ytggf\OneDrive\Документы\renlife\SFTTest\Депозит тест.xlsx"
+REGISTRY_FILE_PATH = r"C:\Users\ytggf\OneDrive\Документы\NPF\Реестр депозитов.xlsx"  # ЗАМЕНИТЕ НА ВАШ ПУТЬ
 
 def parse_number(text):
     """Преобразует строку с числами в формате '12 122 121,31' в float"""
@@ -31,6 +32,59 @@ def calculate_days_until(target_date_str):
     # Если не удалось распарсить, возвращаем исходную строку
     return target_date_str
 
+def save_to_registry(deposits_data, total_amount):
+    """Сохраняет данные о депозитах в реестр"""
+    try:
+        # Открываем файл для записи с помощью openpyxl чтобы сохранить форматирование
+        from openpyxl import load_workbook
+        
+        if os.path.exists(REGISTRY_FILE_PATH):
+            wb = load_workbook(REGISTRY_FILE_PATH)
+        else:
+            messagebox.showerror("Ошибка", f"Файл реестра не найден по пути:\n{REGISTRY_FILE_PATH}")
+            return False
+        
+        # Выбираем лист "2024-2025"
+        if '2024-2025' in wb.sheetnames:
+            ws = wb['2024-2025']
+        else:
+            messagebox.showerror("Ошибка", "Лист '2024-2025' не найден в файле реестра")
+            return False
+        
+        # Находим первую пустую строку в столбце D (сумма)
+        current_row = 4  # Начинаем с 4 строки (после заголовков)
+        while ws.cell(row=current_row, column=4).value is not None:  # Столбец D
+            current_row += 1
+        
+        today_date = datetime.now().strftime('%d.%m.%Y')
+        
+        # Записываем данные для каждого депозита
+        for i, deposit in enumerate(deposits_data):
+            # Столбец D (4) - Сумма
+            ws.cell(row=current_row, column=4, value=deposit['amount'])
+            
+            # Столбец E (5) - Ставка (в процентах, например 15.5)
+            rate_value = float(deposit['rate'].replace('%', '').replace(',', '.'))
+            ws.cell(row=current_row, column=5, value=rate_value)
+            
+            # Столбец H (8) - Размещение (сегодня в формате ДД.ММ.ГГГГ)
+            ws.cell(row=current_row, column=8, value=today_date)
+            
+            # Столбец I (9) - Окончание (в формате ДД.ММ.ГГГГ)
+            # Преобразуем дату из формата ДД.ММ.ГГГГ в тот же формат
+            end_date = deposit['date']
+            ws.cell(row=current_row, column=9, value=end_date)
+            
+            current_row += 1
+        
+        # Сохраняем файл
+        wb.save(REGISTRY_FILE_PATH)
+        return True
+        
+    except Exception as e:
+        messagebox.showerror("Ошибка", f"Ошибка при сохранении в реестр: {str(e)}")
+        return False
+
 def on_deposit_count_change(*args):
     """Обработчик изменения количества депозитов"""
     count = deposit_count.get()
@@ -46,7 +100,7 @@ def on_deposit_count_change(*args):
         entry_payment = tk.Entry(deposit_fields_frame, width=30)
         entry_payment.pack(fill=tk.X, pady=(5, 10))
         
-        tk.Label(deposit_fields_frame, text="Ставка:").pack(anchor=tk.W)
+        tk.Label(deposit_fields_frame, text="Ставка (%):").pack(anchor=tk.W)
         global entry_rate
         entry_rate = tk.Entry(deposit_fields_frame, width=30)
         entry_rate.pack(fill=tk.X, pady=(5, 10))
@@ -66,7 +120,7 @@ def on_deposit_count_change(*args):
         
         # Показываем доступный остаток
         if hasattr(root, 'initial_balance'):
-            available_balance = root.initial_balance - 150000
+            available_balance = root.initial_balance - 10000
             tk.Label(deposit_fields_frame, 
                     text=f"Доступно для размещения: {format_number(available_balance)}",
                     fg="green", font=("Arial", 9, "bold")).pack(anchor=tk.W, pady=(0, 10))
@@ -87,7 +141,7 @@ def on_deposit_count_change(*args):
             entry_amount_dep.pack(fill=tk.X, pady=(2, 5))
             
             # Ставка
-            tk.Label(dep_frame, text="Ставка:").pack(anchor=tk.W)
+            tk.Label(dep_frame, text="Ставка (%):").pack(anchor=tk.W)
             entry_rate_dep = tk.Entry(dep_frame, width=25)
             entry_rate_dep.pack(fill=tk.X, pady=(2, 5))
             
@@ -153,7 +207,7 @@ def process_calculation():
                 return
             
             # Выполняем расчеты
-            final_amount = initial_balance - payment_amount - 150000
+            final_amount = initial_balance - payment_amount - 10000
             rounded_amount = round(final_amount / 1000) * 1000  # Округление до тысяч
             
             # Проверяем, что сумма не отрицательная
@@ -169,7 +223,16 @@ def process_calculation():
 
 Сумма: {format_number(rounded_amount)}
 Срок: до {target_date} ({days_info} дней)
-Ставка: {interest_rate}"""
+Ставка: {interest_rate}%"""
+            
+            # Сохраняем данные для подтверждения
+            root.deposits_data = [{
+                'amount': rounded_amount,
+                'rate': interest_rate,
+                'date': target_date,
+                'days': days_info
+            }]
+            root.total_amount = rounded_amount
             
         else:
             # Обработка нескольких депозитов
@@ -219,25 +282,50 @@ def process_calculation():
             for i, deposit in enumerate(deposits_data):
                 message += f"Депозит {i+1}:\n"
                 message += f"Сумма: {format_number(deposit['amount'])}\n"
-                message += f"Ставка: {deposit['rate']}\n"
+                message += f"Ставка: {deposit['rate']}%\n"
                 message += f"Срок: до {deposit['date']} ({deposit['days']} дней)\n\n"
+
+            # Сохраняем данные для подтверждения
+            root.deposits_data = deposits_data
+            root.total_amount = total_amount
 
         # Показываем результат
         result_text.delete(1.0, tk.END)
         result_text.insert(1.0, message)
         
+        # Активируем кнопку подтверждения
+        btn_confirm.config(state=tk.NORMAL, bg="#2196F3")
+        
         # Копируем в буфер обмена
         root.clipboard_clear()
         root.clipboard_append(message)
-        messagebox.showinfo("Готово", "Сообщение сформировано и скопировано в буфер обмена!")
+        messagebox.showinfo("Готово", "Сообщение сформировано и скопировано в буфер обмена!\nТеперь вы можете подтвердить размещение депозитов.")
         
     except Exception as e:
         messagebox.showerror("Ошибка", f"Произошла ошибка: {str(e)}")
 
+def confirm_deposits():
+    """Подтверждение и сохранение депозитов в реестр"""
+    if not hasattr(root, 'deposits_data'):
+        messagebox.showerror("Ошибка", "Сначала сформируйте сообщение о депозитах")
+        return
+    
+    result = messagebox.askyesno("Подтверждение", 
+                                "Вы уверены, что хотите сохранить данные о депозитах в реестр?\n\n"
+                                "Это действие нельзя отменить.")
+    
+    if result:
+        if save_to_registry(root.deposits_data, root.total_amount):
+            messagebox.showinfo("Успех", "Данные о депозитах успешно сохранены в реестр!")
+            # Деактивируем кнопку подтверждения
+            btn_confirm.config(state=tk.DISABLED, bg="light gray")
+        else:
+            messagebox.showerror("Ошибка", "Не удалось сохранить данные в реестр")
+
 # Создаем графический интерфейс
 root = tk.Tk()
 root.title("Расчет депозитов ГПБ")
-root.geometry("550x650")
+root.geometry("550x700")
 
 # Информация о файле
 frame_info = tk.Frame(root)
@@ -274,7 +362,13 @@ on_deposit_count_change()
 btn_process = tk.Button(root, text="Сформировать сообщение", 
                        command=process_calculation,
                        bg="#4CAF50", fg="white", font=("Arial", 12, "bold"))
-btn_process.pack(pady=15)
+btn_process.pack(pady=10)
+
+# Кнопка подтверждения (изначально неактивна)
+btn_confirm = tk.Button(root, text="Подтвердить размещение депозитов", 
+                       command=confirm_deposits,
+                       state=tk.DISABLED, bg="light gray", fg="black", font=("Arial", 12, "bold"))
+btn_confirm.pack(pady=5)
 
 # Поле для результата
 tk.Label(root, text="Результат:").pack(anchor=tk.W, padx=20)
@@ -297,9 +391,16 @@ instruction = """
 3. Сумма всех депозитов не должна превышать доступный остаток
 4. Нажмите "Сформировать сообщение"
 5. Сообщение автоматически скопируется в буфер обмена
+6. Нажмите "Подтвердить размещение депозитов" для сохранения в реестр
 """
 tk.Label(root, text=instruction, justify=tk.LEFT, fg="gray", 
          font=("Arial", 8)).pack(anchor=tk.W, padx=20, pady=(0, 10))
 
 # Запускаем приложение
-root.mainloop()
+if __name__ == "__main__":
+    # Показываем предупреждение о необходимости настройки пути
+    if REGISTRY_FILE_PATH == r"C:\путь\к\вашему\файлу\Реестр депозитов.xlsx":
+        messagebox.showwarning("Настройка", 
+                              "Перед использованием замените REGISTRY_FILE_PATH в коде на актуальный путь к вашему файлу!")
+    
+    root.mainloop()
