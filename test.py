@@ -1,94 +1,78 @@
 import pandas as pd
 
-def debug_calculations(input_file_path):
-    """Детальный дебаг расчета сумм"""
+def get_daily_portfolio_totals(input_file_path):
+    """Получает сумму по каждому портфелю за каждую дату"""
     
-    print(f"🔍 ДЕТАЛЬНЫЙ ДЕБАГ РАСЧЕТОВ...")
+    print(f"📊 ПОЛУЧЕНИЕ ДАННЫХ ПО ДАТАМ И ПОРТФЕЛЯМ...")
     
     try:
         # Читаем файл
         df = pd.read_excel(input_file_path, header=0)
         df = df.rename(columns={df.columns[0]: 'Портфель'})
         
-        # Фильтруем валидные строки
-        df = df[df['Портфель'].notna()]
-        df = df[~df['Портфель'].astype(str).str.contains('итог', case=False, na=False)]
-        df = df[df['Портфель'].astype(str).str.len() < 100]
+        # Определяем нужные колонки
+        money_columns = [
+            'Стоимость',
+            'НКД,\nначисленные %', 
+            'Дебеторская/ Кредиторская задолженности'
+        ]
         
-        print(f"Всего строк: {len(df)}")
+        # Находим колонку с датой отчета
+        date_column = None
+        for col in df.columns:
+            if 'дата' in str(col).lower() and 'отчет' in str(col).lower():
+                date_column = col
+                break
         
-        # Смотрим на конкретные колонки
-        target_columns = ['Стоимость', 'НКД,\nначисленные %', 'Дебеторская/ Кредиторская задолженности']
+        if date_column is None:
+            print("❌ Не найдена колонка с датой отчета")
+            return None
         
-        print(f"\n📊 АНАЛИЗ КОЛОНОК:")
-        for col in target_columns:
+        print(f"Колонка с датой: '{date_column}'")
+        
+        # Конвертируем дату и числовые колонки
+        df[date_column] = pd.to_datetime(df[date_column], errors='coerce')
+        
+        for col in money_columns:
             if col in df.columns:
-                # Конвертируем в числа
                 df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-                
-                # Статистика по колонке
-                total = df[col].sum()
-                avg = df[col].mean()
-                max_val = df[col].max()
-                min_val = df[col].min()
-                
-                print(f"\n{col}:")
-                print(f"  Сумма: {total:,.2f}")
-                print(f"  Среднее: {avg:,.2f}")
-                print(f"  Максимум: {max_val:,.2f}")
-                print(f"  Минимум: {min_val:,.2f}")
-                print(f"  Не нулевых значений: {(df[col] != 0).sum()}")
-                
-                # Покажем первые 10 ненулевых значений
-                non_zero = df[df[col] != 0][['Портфель', col]].head(10)
-                if len(non_zero) > 0:
-                    print(f"  Примеры ненулевых значений:")
-                    for _, row in non_zero.iterrows():
-                        print(f"    {row['Портфель']}: {row[col]:,.2f}")
+                print(f"💰 Обработана колонка: {col}")
             else:
-                print(f"❌ Колонка '{col}' не найдена")
+                print(f"⚠️ Колонка '{col}' не найдена")
         
-        # Теперь посмотрим на один конкретный портфель
-        print(f"\n🎯 АНАЛИЗ КОНКРЕТНОГО ПОРТФЕЛЯ:")
-        sample_portfolio = df[df['Портфель'].str.contains('020611/1', na=False)].head(1)
-        if len(sample_portfolio) > 0:
-            portfolio_name = sample_portfolio['Портфель'].iloc[0]
-            print(f"Портфель: {portfolio_name}")
-            
-            for col in target_columns:
-                if col in sample_portfolio.columns:
-                    value = sample_portfolio[col].iloc[0]
-                    print(f"  {col}: {value:,.2f}")
+        # Фильтруем валидные данные
+        df = df[df['Портфель'].notna()]
+        df = df[df[date_column].notna()]
         
-        # Суммируем только по нужным колонкам
-        print(f"\n🧮 ПРАВИЛЬНЫЙ РАСЧЕТ:")
-        df['Итог'] = 0
-        for col in target_columns:
+        print(f"📅 Уникальные даты в файле: {df[date_column].dt.date.unique()}")
+        print(f"🎯 Уникальные портфели: {df['Портфель'].nunique()}")
+        
+        # Суммируем нужные колонки
+        df['Общая_сумма'] = 0
+        for col in money_columns:
             if col in df.columns:
-                df['Итог'] += df[col]
+                df['Общая_сумма'] += df[col]
         
-        # Группируем по портфелям
-        portfolio_totals = df.groupby('Портфель')['Итог'].sum().reset_index()
+        # Группируем по дате и портфелю
+        result = df.groupby([date_column, 'Портфель'])['Общая_сумма'].sum().reset_index()
         
-        # Покажем топ-10 портфелей по сумме
-        print(f"\n📈 ТОП-10 ПОРТФЕЛЕЙ ПО СУММЕ:")
-        top_portfolios = portfolio_totals.nlargest(10, 'Итог')
-        for _, row in top_portfolios.iterrows():
-            print(f"  {row['Портфель']}: {row['Итог']:,.2f}")
+        print(f"\n📈 РЕЗУЛЬТАТ - СУММЫ ПО ДАТАМ И ПОРТФЕЛЯМ:")
+        print(f"Всего записей: {len(result)}")
         
-        # Общая сумма
-        total_sum = portfolio_totals['Итог'].sum()
-        print(f"\n💰 ОБЩАЯ СУММА ВСЕХ ПОРТФЕЛЕЙ: {total_sum:,.2f}")
+        # Показываем данные по датам
+        dates = result[date_column].dt.date.unique()
+        for date in sorted(dates):
+            date_data = result[result[date_column].dt.date == date]
+            print(f"\n📅 {date}:")
+            print(f"   Всего портфелей: {len(date_data)}")
+            print(f"   Общая сумма за день: {date_data['Общая_сумма'].sum():,.2f}")
+            
+            # Показываем топ-5 портфелей за эту дату
+            top_portfolios = date_data.nlargest(5, 'Общая_сумма')
+            for _, row in top_portfolios.iterrows():
+                print(f"   - {row['Портфель']}: {row['Общая_сумма']:,.2f}")
         
-        # Проверим, может быть я неправильно понимаю валюту?
-        print(f"\n💱 ПРОВЕРКА ВАЛЮТЫ:")
-        if 'Валюта котировки' in df.columns:
-            currencies = df['Валюта котировки'].value_counts()
-            print("Распределение по валютам:")
-            for currency, count in currencies.items():
-                print(f"  {currency}: {count} записей")
-        
-        return portfolio_totals
+        return result
         
     except Exception as e:
         print(f"❌ Ошибка: {e}")
@@ -96,7 +80,50 @@ def debug_calculations(input_file_path):
         traceback.print_exc()
         return None
 
-# Запускаем дебаг
+def save_daily_totals_to_excel(data, output_file_path):
+    """Сохраняет результаты в Excel"""
+    
+    if data is None:
+        return
+    
+    try:
+        # Сохраняем в Excel
+        with pd.ExcelWriter(output_file_path, engine='openpyxl') as writer:
+            # Основная таблица
+            data.to_excel(writer, sheet_name='Суммы_по_датам', index=False)
+            
+            # Сводка по датам
+            summary_by_date = data.groupby(data.iloc[:, 0].dt.date)['Общая_сумма'].agg(['sum', 'count']).reset_index()
+            summary_by_date.columns = ['Дата', 'Общая_сумма', 'Количество_портфелей']
+            summary_by_date.to_excel(writer, sheet_name='Сводка_по_датам', index=False)
+            
+            # Сводка по портфелям
+            summary_by_portfolio = data.groupby('Портфель')['Общая_сумма'].agg(['sum', 'count']).reset_index()
+            summary_by_portfolio.columns = ['Портфель', 'Общая_сумма', 'Количество_дней']
+            summary_by_portfolio.to_excel(writer, sheet_name='Сводка_по_портфелям', index=False)
+        
+        print(f"\n💾 Результаты сохранены в: {output_file_path}")
+        
+    except Exception as e:
+        print(f"❌ Ошибка при сохранении: {e}")
+
+# Запускаем обработку
 if __name__ == "__main__":
     input_file = r"M:\Финансовый департамент\Treasury\Базы данных(автоматизация)\DI_DATABASE\Мерджер.xlsx"
-    debug_calculations(input_file)
+    output_file = r"M:\Финансовый департамент\Treasury\Базы данных(автоматизация)\DI_DATABASE\ежедневные_суммы.xlsx"
+    
+    print("🚀 ЗАПУСК РАСЧЕТА ЕЖЕДНЕВНЫХ СУММ...")
+    
+    # Получаем данные
+    daily_totals = get_daily_portfolio_totals(input_file)
+    
+    if daily_totals is not None:
+        # Сохраняем в Excel
+        save_daily_totals_to_excel(daily_totals, output_file)
+        
+        print(f"\n✅ РАСЧЕТ ЗАВЕРШЕН!")
+        print(f"📊 Получено {len(daily_totals)} записей")
+        print(f"📅 Охвачено дат: {daily_totals.iloc[:, 0].nunique()}")
+        print(f"🎯 Охвачено портфелей: {daily_totals['Портфель'].nunique()}")
+    else:
+        print("❌ Не удалось получить данные")
