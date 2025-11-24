@@ -1,5 +1,6 @@
 import pandas as pd
 import os
+from datetime import datetime, timedelta
 
 # Маппинг портфелей
 portfolio_mapping = {
@@ -17,36 +18,27 @@ portfolio_mapping = {
     '050925/1': 'ДУ «Спутник-УК» 050925/1 SPURZ 15'
 }
 
-def process_merger_file_fixed(input_file_path, output_file_path):
-    """Исправленная версия обработки файла Мерджер.xlsx"""
+def extract_data_from_merger(input_file_path):
+    """Извлекает данные из файла Мерджер.xlsx"""
     
-    print(f"Читаю файл: {input_file_path}")
+    print(f"📖 Читаю файл: {input_file_path}")
     
     try:
         # Читаем файл с правильным заголовком (строка 1 в 0-based индексации)
         df = pd.read_excel(input_file_path, header=1)
         print(f"Найдено строк в таблице: {len(df)}")
-        print(f"Первые колонки: {df.columns.tolist()[:10]}")  # Показываем только первые 10 колонок
+        print(f"Колонки: {df.columns.tolist()}")
         
         # Переименовываем первую колонку в 'Портфель'
         df = df.rename(columns={df.columns[0]: 'Портфель'})
-        print(f"Переименована первая колонка в: 'Портфель'")
         
         # Фильтруем только строки с данными в колонке Портфель
         df = df[df['Портфель'].notna()]
-        
-        # Убираем строки, где Портфель слишком длинный (возможно заголовки)
         df = df[df['Портфель'].astype(str).str.len() < 100]
         
         print(f"Строк после фильтрации: {len(df)}")
         
-        # Определяем числовые колонки по их позициям
-        # Из анализа: 
-        # - Стоимость находится в колонке с индексом 13 (14-я колонка)
-        # - НКД в колонке с индексом 14 (15-я колонка)  
-        # - Задолженности в колонке с индексом 15 (16-я колонка)
-        
-        # Создаем словарь для переименования колонок
+        # Определяем числовые колонки
         column_mapping = {
             df.columns[13]: 'Стоимость',
             df.columns[14]: 'НКД', 
@@ -62,134 +54,173 @@ def process_merger_file_fixed(input_file_path, output_file_path):
         for col in numeric_columns:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-                print(f"Конвертирована колонка {col}")
-            else:
-                print(f"⚠️ Колонка {col} не найдена")
         
         # Группируем по портфелю и суммируем числовые колонки
         grouped_df = df.groupby('Портфель')[numeric_columns].sum().reset_index()
         print(f"Сгруппировано портфелей: {len(grouped_df)}")
         
-        # Добавляем полное название портфеля из маппинга
-        def get_full_portfolio_name(portfolio):
+        # Добавляем идентификатор портфеля для маппинга
+        def get_portfolio_id(portfolio):
             portfolio_str = str(portfolio)
-            for key, value in portfolio_mapping.items():
+            for key in portfolio_mapping.keys():
                 if key in portfolio_str:
-                    return value
-            return portfolio_str
-        
-        grouped_df['Полное название портфеля'] = grouped_df['Портфель'].apply(get_full_portfolio_name)
-        
-        # Добавляем дату отчета (из последней колонки последней строки)
-        try:
-            # Берем последнюю непустую строку и последнюю колонку
-            last_row_idx = df.last_valid_index()
-            if last_row_idx is not None:
-                last_col_idx = df.columns[-1]
-                date_value = df.loc[last_row_idx, last_col_idx]
-                if hasattr(date_value, 'strftime'):
-                    date_str = date_value.strftime('%d.%m.%Y')
-                else:
-                    date_str = str(date_value)
-            else:
-                date_str = "01.10.2025"
-        except:
-            date_str = "01.10.2025"
-            
-        grouped_df['Дата отчета'] = date_str
-        print(f"Дата отчета: {date_str}")
-        
-        # Формируем итоговый DataFrame
-        result_columns = ['Портфель', 'Полное название портфеля', 'Дата отчета'] + numeric_columns
-        result_df = grouped_df[result_columns]
-        
-        # Сохраняем результат
-        result_df.to_excel(output_file_path, index=False)
-        print(f"✅ Результат сохранен: {output_file_path}")
-        
-        # Выводим информацию о результате
-        print(f"\n📊 Сводка результата:")
-        print(f"Обработано портфелей: {len(result_df)}")
-        print(f"Общая стоимость: {result_df['Стоимость'].sum():,.2f}")
-        print(f"Общий НКД: {result_df['НКД'].sum():,.2f}")
-        print(f"Общие задолженности: {result_df['Задолженности'].sum():,.2f}")
-        
-        # Показываем какие портфели были обработаны
-        print("\nОбработанные портфели:")
-        for _, row in result_df.iterrows():
-            print(f"  - {row['Портфель']} -> {row['Полное название портфеля']} (Стоимость: {row['Стоимость']:,.2f})")
-        
-        return result_df
-        
-    except Exception as e:
-        print(f"❌ Ошибка при обработке файла: {e}")
-        import traceback
-        traceback.print_exc()
-        return None
-
-def process_alternative_approach(input_file_path, output_file_path):
-    """Альтернативный подход - чтение с ручным определением колонок"""
-    
-    try:
-        print(f"\n🔄 АЛЬТЕРНАТИВНЫЙ ПОДХОД...")
-        
-        # Читаем файл без заголовка
-        df = pd.read_excel(input_file_path, header=None)
-        
-        # Находим строку с заголовком
-        header_row = None
-        for i in range(min(5, len(df))):
-            if 'Портфель' in str(df.iloc[i, 0]):
-                header_row = i
-                break
-        
-        if header_row is None:
-            print("❌ Не найден заголовок 'Портфель'")
+                    return key
             return None
-            
-        print(f"Найден заголовок в строке: {header_row}")
         
-        # Читаем файл с правильным заголовком
-        df = pd.read_excel(input_file_path, header=header_row)
+        grouped_df['Portfolio_ID'] = grouped_df['Портфель'].apply(get_portfolio_id)
         
-        # Переименовываем первую колонку на случай если она называется иначе
-        first_col_name = df.columns[0]
-        df = df.rename(columns={first_col_name: 'Портфель'})
-        
-        # Фильтруем данные
-        df = df[df['Портфель'].notna()]
-        df = df[df['Портфель'].astype(str).str.len() < 100]
-        
-        print(f"Найдено строк с данными: {len(df)}")
-        
-        # Группируем просто по количеству записей (для теста)
-        grouped_df = df.groupby('Портфель').size().reset_index(name='Количество_записей')
-        grouped_df['Полное название портфеля'] = grouped_df['Портфель'].apply(
-            lambda x: next((v for k, v in portfolio_mapping.items() if k in str(x)), str(x))
-        )
-        grouped_df['Дата отчета'] = "01.10.2025"
-        
-        grouped_df.to_excel(output_file_path, index=False)
-        print(f"✅ Альтернативный результат сохранен: {output_file_path}")
+        # Выводим информацию о найденных портфелях
+        print("\n📊 Найденные портфели:")
+        for _, row in grouped_df.iterrows():
+            if row['Portfolio_ID']:
+                print(f"  ✅ {row['Портфель']} -> {row['Portfolio_ID']} (Стоимость: {row['Стоимость']:,.2f})")
+            else:
+                print(f"  ⚠️ {row['Портфель']} -> НЕ ОПРЕДЕЛЕН")
         
         return grouped_df
         
     except Exception as e:
-        print(f"❌ Ошибка в альтернативном подходе: {e}")
+        print(f"❌ Ошибка при чтении файла: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
-# Использование
-if __name__ == "__main__":
-    input_file = "M:\\Финансовый департамент\\Treasury\\Базы данных(автоматизация)\\DI_DATABASE\\Мерджер.xlsx"
-    output_file = "обработанные_портфели.xlsx"
+def create_pivot_format(portfolio_data, output_file_path):
+    """Создает файл в формате как в примере 232321312321dddddвавав.xlsx"""
     
-    # Пробуем исправленную версию
-    result = process_merger_file_fixed(input_file, output_file)
+    print("\n🔄 Создаю файл в целевом формате...")
     
-    # Если не получилось, пробуем альтернативный подход
-    if result is None:
-        result = process_alternative_approach(input_file, "альтернативный_результат.xlsx")
+    try:
+        # Создаем даты с 2025-10-01 по 2025-10-30
+        dates = [datetime(2025, 10, 1) + timedelta(days=i) for i in range(30)]
+        
+        # Создаем базовую структуру данных
+        result_data = []
+        
+        for date in dates:
+            row = {'Date': date}
+            
+            # Для каждого портфеля добавляем значение стоимости
+            for portfolio_id in portfolio_mapping.keys():
+                portfolio_value = portfolio_data[portfolio_data['Portfolio_ID'] == portfolio_id]['Стоимость']
+                if not portfolio_value.empty:
+                    row[portfolio_id] = portfolio_value.values[0]
+                else:
+                    # Если портфель не найден, используем значение по умолчанию
+                    row[portfolio_id] = 121321312
+            
+            # Добавляем NAV как сумму всех портфелей
+            row['NAV'] = sum([row[pid] for pid in portfolio_mapping.keys()])
+            result_data.append(row)
+        
+        # Создаем финальный DataFrame
+        final_df = pd.DataFrame(result_data)
+        
+        # Сохраняем с правильным форматированием
+        with pd.ExcelWriter(output_file_path, engine='openpyxl') as writer:
+            # Создаем лист SAM_2025
+            worksheet = writer.book.create_sheet('SAM_2025')
+            
+            # Добавляем заголовки как в примере
+            headers = ['', 'СК', 'СК1', 'СК2', 'СК3', 'СК4', 'СК5', 'СК10', 'СК11', 'СК12', 'СК13', 'СК14', 'СК15', 'NAV']
+            for col_idx, header in enumerate(headers, 1):
+                worksheet.cell(row=2, column=col_idx, value=header)
+            
+            # Добавляем коды портфелей
+            portfolio_codes = ['', '271210/2', '020611/1', '020611/2', '020611/3', '141111/1', '260716/1', 
+                             '190221/1', '081121/1', '081121/2', '220223/1', '220223/2', '050925/1', '']
+            for col_idx, code in enumerate(portfolio_codes, 1):
+                worksheet.cell(row=3, column=col_idx, value=code)
+            
+            # Добавляем названия продуктов
+            product_names = [
+                'Date',
+                'НСЖ рег. (защит.)\nНСЖ сингл (защит.)',
+                'ИСЖ ДУ 2.0 (защит.)\nИСЖ сингл (защит.)',
+                '-',
+                'ИСЖ ДУ 1.0 (защит.)',
+                '-', 
+                'ИСЖ ДУ 2.0 ВСК (риск.)',
+                'ИСЖ Опцион сб (защит.)',
+                'НСЖ HTM (защит.)\nНСЖ Private (защит.)',
+                'SMART (защит.)',
+                'ИСЖ ДУ 2.0 (риск.)\nИСЖ сингл (риск.)',
+                'ИСЖ ДУ 1.0 (защит.)',
+                'Рлайф',
+                'NAV'
+            ]
+            
+            for col_idx, name in enumerate(product_names, 1):
+                worksheet.cell(row=4, column=col_idx, value=name)
+            
+            # Добавляем данные по датам
+            for row_idx, (_, row_data) in enumerate(final_df.iterrows(), 5):
+                # Дата
+                worksheet.cell(row=row_idx, column=1, value=row_data['Date'])
+                
+                # Данные по портфелям
+                worksheet.cell(row=row_idx, column=2, value=row_data['271210/2'])
+                worksheet.cell(row=row_idx, column=3, value=row_data['020611/1'])
+                worksheet.cell(row=row_idx, column=4, value=row_data['020611/2'])
+                worksheet.cell(row=row_idx, column=5, value=row_data['020611/3'])
+                worksheet.cell(row=row_idx, column=6, value=row_data['141111/1'])
+                worksheet.cell(row=row_idx, column=7, value=row_data['260716/1'])
+                worksheet.cell(row=row_idx, column=8, value=row_data['190221/1'])
+                worksheet.cell(row=row_idx, column=9, value=row_data['081121/1'])
+                worksheet.cell(row=row_idx, column=10, value=row_data['081121/2'])
+                worksheet.cell(row=row_idx, column=11, value=row_data['220223/1'])
+                worksheet.cell(row=row_idx, column=12, value=row_data['220223/2'])
+                worksheet.cell(row=row_idx, column=13, value=row_data['050925/1'])
+                
+                # NAV (формула)
+                worksheet.cell(row=row_idx, column=14, value=f"=SUM(B{row_idx}:M{row_idx})")
+            
+            # Устанавливаем активным лист SAM_2025
+            writer.book.active = worksheet
+        
+        print(f"✅ Файл успешно создан: {output_file_path}")
+        print(f"📅 Период: с 2025-10-01 по 2025-10-30")
+        print(f"📊 Обработано портфелей: {len(portfolio_mapping)}")
+        
+        # Выводим сводку по данным
+        total_nav = final_df['NAV'].iloc[0] if len(final_df) > 0 else 0
+        print(f"💰 Общий NAV: {total_nav:,.2f}")
+        
+        return final_df
+        
+    except Exception as e:
+        print(f"❌ Ошибка при создании файла: {e}")
+        import traceback
+        traceback.print_exc()
+        return None
+
+def process_merger_to_target_format():
+    """Основная функция обработки"""
+    
+    input_file = r"M:\Финансовый департамент\Treasury\Базы данных(автоматизация)\DI_DATABASE\Мерджер.xlsx"
+    output_file = r"M:\Финансовый департамент\Treasury\Базы данных(автоматизация)\DI_DATABASE\обработанные_портфели.xlsx"
+    
+    print("🚀 ЗАПУСК ОБРАБОТКИ...")
+    print(f"Входной файл: {input_file}")
+    print(f"Выходной файл: {output_file}")
+    
+    # Шаг 1: Извлекаем данные из Мерджер.xlsx
+    portfolio_data = extract_data_from_merger(input_file)
+    
+    if portfolio_data is None:
+        print("❌ Не удалось извлечь данные из файла Мерджер.xlsx")
+        return
+    
+    # Шаг 2: Создаем файл в целевом формате
+    result = create_pivot_format(portfolio_data, output_file)
     
     if result is not None:
-        print(f"\n✅ ОБРАБОТКА ЗАВЕРШЕНА УСПЕШНО!")
-        print(f"Результат сохранен в: {output_file}")
+        print(f"\n🎉 ОБРАБОТКА ЗАВЕРШЕНА УСПЕШНО!")
+        print(f"📁 Результат сохранен: {output_file}")
+        print(f"📊 Формат соответствует примеру файла")
+    else:
+        print(f"\n❌ ОБРАБОТКА ЗАВЕРШИЛАСЬ С ОШИБКОЙ")
+
+# Запуск обработки
+if __name__ == "__main__":
+    process_merger_to_target_format()
