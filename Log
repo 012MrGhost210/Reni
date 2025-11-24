@@ -48,3 +48,10 @@ Traceback (most recent call last):
 KeyError: 'Портфель'
 
 ❌ Обработка не удалась
+
+
+
+
+input_file = r"M:\\Финансовый департамент\\Treasury\\Базы данных(автоматизация)\\DI_DATABASE\\Мерджер.xlsx"
+    output_file = r"M:\\Финансовый департамент\\Treasury\\Базы данных(автоматизация)\\DI_DATABASE\\обработанные_портфели.xlsx"
+
