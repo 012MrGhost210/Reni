@@ -1,12 +1,12 @@
 import pandas as pd
 
-def transform_to_wide_format_simple(input_file_path, output_file_path):
-    """Преобразует данные в широкий формат (простая версия)"""
+def create_final_file(input_file_path, output_file_path):
+    """Создает финальный файл с широким форматом и переименованными портфелями"""
     
-    print(f"🔄 ПРЕОБРАЗОВАНИЕ В ШИРОКИЙ ФОРМАТ...")
+    print(f"🚀 СОЗДАНИЕ ФИНАЛЬНОГО ФАЙЛА...")
     
     try:
-        # Читаем файл
+        # Читаем исходный файл
         df = pd.read_excel(input_file_path, header=0)
         df = df.rename(columns={df.columns[0]: 'Портфель'})
         
@@ -28,7 +28,7 @@ def transform_to_wide_format_simple(input_file_path, output_file_path):
             print("❌ Не найдена колонка с датой отчета")
             return None
         
-        print(f"Колонка с датой: '{date_column}'")
+        print(f"📅 Колонка с датой: '{date_column}'")
         
         # Конвертируем дату и числовые колонки
         df[date_column] = pd.to_datetime(df[date_column], errors='coerce')
@@ -65,33 +65,11 @@ def transform_to_wide_format_simple(input_file_path, output_file_path):
         wide_df = wide_df.rename(columns={date_column: 'Date'})
         wide_df['Date'] = wide_df['Date'].dt.strftime('%d.%m.%Y')
         
-        print(f"✅ Преобразовано в широкий формат:")
+        print(f"✅ Широкий формат создан:")
         print(f"   - Дат: {len(wide_df)}")
         print(f"   - Портфелей: {len(wide_df.columns) - 1}")
         
-        # Показываем список портфелей
-        portfolio_columns = [col for col in wide_df.columns if col != 'Date']
-        print(f"   - Список портфелей: {len(portfolio_columns)} шт")
-        
-        # Сохраняем первоначальный широкий формат
-        wide_df.to_excel(output_file_path, index=False)
-        print(f"💾 Широкий формат сохранен: {output_file_path}")
-        
-        return wide_df
-        
-    except Exception as e:
-        print(f"❌ Ошибка: {e}")
-        import traceback
-        traceback.print_exc()
-        return None
-
-def rename_portfolio_columns(wide_df, output_file_path):
-    """Переименовывает колонки с портфелями по маппингу"""
-    
-    print(f"\n🔄 ПЕРЕИМЕНОВАНИЕ ПОРТФЕЛЕЙ...")
-    
-    try:
-        # Маппинг для переименования портфелей
+        # Переименовываем колонки по маппингу
         portfolio_mapping = {
             '020611/1 агресс. от 02.06.2011': '020611/1',
             '020611/2 агресс. от 02.06.2011': '020611/2', 
@@ -110,63 +88,61 @@ def rename_portfolio_columns(wide_df, output_file_path):
         # Создаем словарь для переименования колонок
         column_rename = {'Date': 'Date'}
         
-        # Для каждой колонки в данных
+        print(f"\n🔄 ПЕРЕИМЕНОВАНИЕ ПОРТФЕЛЕЙ:")
         for col in wide_df.columns:
-            if col != 'Date':
-                # Ищем соответствие в маппинге
-                new_name = None
-                for old_name, new_name_val in portfolio_mapping.items():
-                    if old_name in col:
-                        new_name = new_name_val
-                        break
+            if col == 'Date':
+                continue
                 
-                if new_name:
+            # Ищем соответствие в маппинге
+            found_match = False
+            for old_name, new_name in portfolio_mapping.items():
+                if old_name in col:
                     column_rename[col] = new_name
-                    print(f"   ✅ {col} -> {new_name}")
-                else:
-                    # Оставляем оригинальное название если нет в маппинге
-                    column_rename[col] = col
-                    print(f"   ⚠️ {col} -> оставлено без изменений")
+                    print(f"   ✅ '{col}' -> '{new_name}'")
+                    found_match = True
+                    break
+            
+            # Если не нашли соответствие, оставляем оригинальное название
+            if not found_match:
+                column_rename[col] = col
+                print(f"   ⚠️ '{col}' -> оставлено без изменений")
         
         # Применяем переименование
-        renamed_df = wide_df.rename(columns=column_rename)
+        final_df = wide_df.rename(columns=column_rename)
         
-        # Сохраняем результат
-        renamed_df.to_excel(output_file_path, index=False)
-        print(f"💾 Файл с переименованными портфелями сохранен: {output_file_path}")
+        # Сохраняем финальный файл
+        final_df.to_excel(output_file_path, index=False)
+        print(f"\n💾 Финальный файл сохранен: {output_file_path}")
         
-        return renamed_df
+        # Статистика
+        print(f"\n📊 ИТОГОВАЯ СТАТИСТИКА:")
+        print(f"   - Дат: {len(final_df)}")
+        print(f"   - Портфелей: {len(final_df.columns) - 1}")
+        print(f"   - Диапазон дат: {final_df['Date'].min()} - {final_df['Date'].max()}")
+        
+        # Показываем список портфелей в финальном файле
+        portfolio_cols = [col for col in final_df.columns if col != 'Date']
+        print(f"   - Портфели в файле: {portfolio_cols}")
+        
+        return final_df
         
     except Exception as e:
-        print(f"❌ Ошибка при переименовании: {e}")
+        print(f"❌ Ошибка: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 # Запускаем обработку
 if __name__ == "__main__":
     input_file = r"M:\Финансовый департамент\Treasury\Базы данных(автоматизация)\DI_DATABASE\Мерджер.xlsx"
-    wide_output = r"M:\Финансовый департамент\Treasury\Базы данных(автоматизация)\DI_DATABASE\широкий_формат.xlsx"
-    final_output = r"M:\Финансовый департамент\Treasury\Базы данных(автоматизация)\DI_DATABASE\финальный_формат.xlsx"
+    output_file = r"M:\Финансовый департамент\Treasury\Базы данных(автоматизация)\DI_DATABASE\финальный_формат.xlsx"
     
-    print("🚀 ЗАПУСК ПРЕОБРАЗОВАНИЯ...")
+    print("🚀 ЗАПУСК СОЗДАНИЯ ФИНАЛЬНОГО ФАЙЛА...")
     
-    # Шаг 1: Создаем широкий формат
-    wide_data = transform_to_wide_format_simple(input_file, wide_output)
+    result = create_final_file(input_file, output_file)
     
-    if wide_data is not None:
-        # Шаг 2: Переименовываем портфели
-        final_data = rename_portfolio_columns(wide_data, final_output)
-        
-        if final_data is not None:
-            print(f"\n🎉 ПРЕОБРАЗОВАНИЕ ЗАВЕРШЕНО!")
-            print(f"📊 ИТОГОВАЯ СТАТИСТИКА:")
-            print(f"   - Дат: {len(final_data)}")
-            print(f"   - Портфелей: {len(final_data.columns) - 1}")
-            print(f"   - Диапазон дат: {final_data['Date'].min()} - {final_data['Date'].max()}")
-            
-            # Показываем список портфелей в финальном файле
-            portfolio_cols = [col for col in final_data.columns if col != 'Date']
-            print(f"   - Портфели в файле: {portfolio_cols}")
-        else:
-            print("❌ Не удалось переименовать портфели")
+    if result is not None:
+        print(f"\n🎉 ФАЙЛ УСПЕШНО СОЗДАН!")
+        print(f"📁 Расположение: {output_file}")
     else:
-        print("❌ Не удалось создать широкий формат")
+        print("❌ Не удалось создать файл")
