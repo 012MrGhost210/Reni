@@ -1,54 +1,68 @@
+import os
+import glob
 import pandas as pd
 import xml.etree.ElementTree as ET
-from openpyxl import Workbook
-from openpyxl.utils.dataframe import dataframe_to_rows
 
-def xml_to_excel_advanced(xml_file, excel_file, root_tag=None):
+def simple_xml_to_excel_converter():
     """
-    Универсальный конвертер XML в Excel
+    Простой конвертер - берет все XML из папки 'xml' и сохраняет в папку 'excel'
     """
-    tree = ET.parse(xml_file)
-    root = tree.getroot()
+    # Определяем пути
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    xml_folder = os.path.join(script_dir, "xml")
+    excel_folder = os.path.join(script_dir, "excel")
     
-    # Определяем корневой элемент для данных
-    if root_tag:
-        data_root = root.find(root_tag)
-    else:
-        data_root = root
+    # Создаем папки если их нет
+    os.makedirs(xml_folder, exist_ok=True)
+    os.makedirs(excel_folder, exist_ok=True)
     
-    # Собираем все уникальные теги
-    all_tags = set()
-    rows = []
+    # Находим все XML файлы
+    xml_files = glob.glob(os.path.join(xml_folder, "*.xml"))
     
-    for item in data_root:
-        row_data = {}
-        for element in item.iter():
-            if element != item:  # Пропускаем сам элемент-родитель
-                if len(element) == 0:  # Только листовые элементы
-                    row_data[element.tag] = element.text
-                    all_tags.add(element.tag)
-        rows.append(row_data)
+    if not xml_files:
+        print(f"⚠️ Поместите XML файлы в папку: {xml_folder}")
+        return
     
-    # Создаем DataFrame
-    df = pd.DataFrame(rows, columns=list(all_tags))
+    print(f"Найдено {len(xml_files)} XML файлов")
     
-    # Сохраняем в Excel с настройкой ширины колонок
-    with pd.ExcelWriter(excel_file, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False, sheet_name='Data')
+    # Обрабатываем каждый файл
+    for xml_file in xml_files:
+        filename = os.path.basename(xml_file)
+        excel_name = os.path.splitext(filename)[0] + ".xlsx"
+        excel_file = os.path.join(excel_folder, excel_name)
         
-        # Автонастройка ширины колонок
-        worksheet = writer.sheets['Data']
-        for column in worksheet.columns:
-            max_length = 0
-            column_letter = column[0].column_letter
-            for cell in column:
-                try:
-                    if len(str(cell.value)) > max_length:
-                        max_length = len(str(cell.value))
-                except:
-                    pass
-            adjusted_width = min(max_length + 2, 50)
-            worksheet.column_dimensions[column_letter].width = adjusted_width
+        try:
+            # Читаем XML
+            tree = ET.parse(xml_file)
+            root = tree.getroot()
+            
+            # Собираем данные
+            data = []
+            for item in root:
+                row = {}
+                for elem in item:
+                    if len(elem) == 0:  # Простые элементы
+                        row[elem.tag] = elem.text
+                    else:  # Вложенные элементы
+                        for sub_elem in elem:
+                            row[f"{elem.tag}_{sub_elem.tag}"] = sub_elem.text
+                if row:
+                    data.append(row)
+            
+            if data:
+                # Сохраняем в Excel
+                df = pd.DataFrame(data)
+                df.to_excel(excel_file, index=False)
+                print(f"✅ {filename} -> {excel_name}")
+            else:
+                print(f"⚠️ {filename}: нет данных для конвертации")
+                
+        except Exception as e:
+            print(f"❌ Ошибка при обработке {filename}: {str(e)}")
     
-    print(f"Конвертация завершена. Файл сохранен: {excel_file}")
-    return df
+    print(f"\n🎉 Готово! Excel файлы сохранены в: {excel_folder}")
+
+# Автоматический запуск при выполнении скрипта
+if __name__ == "__main__":
+    simple_xml_to_excel_converter()
+    input("\nНажмите Enter для выхода...")
