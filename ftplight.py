@@ -123,3 +123,42 @@ if __name__ == "__main__":
     )
     
     input("\nНажмите Enter для выхода...")
+
+
+брабатываю: ???????????
+   Сохраняю как: ___________
+   ⚙️  Пропускаю элемент
+
+📝 Обрабатываю: ??????????????? ????????
+   Сохраняю как: _______________ ________
+   ⚙️  Пропускаю элемент
+
+📝 Обрабатываю: ????????
+   Сохраняю как: ________
+   ⚙️  Пропускаю элемент
+
+📝 Обрабатываю: ????????? ?????????????
+   Сохраняю как: _________ _____________
+   ⚙️  Пропускаю элемент
+
+📝 Обрабатываю: ????????? ???????
+   Сохраняю как: _________ _______
+   ⚙️  Пропускаю элемент
+Traceback (most recent call last):
+  File "c:/Users/Ilya.Matveev2/Скрипты/Files redactor/ftp light.py", line 193, in <module>
+    main()
+  File "c:/Users/Ilya.Matveev2/Скрипты/Files redactor/ftp light.py", line 178, in main
+    ftp.quit()
+  File "C:\Program Files\Python38\lib\ftplib.py", line 655, in quit
+    resp = self.voidcmd('QUIT')
+  File "C:\Program Files\Python38\lib\ftplib.py", line 282, in voidcmd
+    return self.voidresp()
+  File "C:\Program Files\Python38\lib\ftplib.py", line 255, in voidresp
+    resp = self.getresp()
+  File "C:\Program Files\Python38\lib\ftplib.py", line 240, in getresp
+    resp = self.getmultiline()
+  File "C:\Program Files\Python38\lib\ftplib.py", line 226, in getmultiline
+    line = self.getline()
+  File "C:\Program Files\Python38\lib\ftplib.py", line 214, in getline
+    raise EOFError
+EOFError
