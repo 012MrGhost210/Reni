@@ -43,9 +43,9 @@ def copy_all_ftp(server, user, password, remote_path="/", local_path="./ftp_copy
 
 # ПРОСТО ВСТАВЬТЕ СВОИ ДАННЫЕ И ЗАПУСТИТЕ!
 copy_all_ftp(
-    server="ваш_ftp_сервер",
-    user="логин",
-    password="пароль",
-    remote_path="/",  # откуда копировать (обычно корень)
-    local_path="./ftp_all_files"  # куда сохранить
+    server="ftp.renlife.com",
+    user="Ilya.Matveev2@mos.renlife.com",
+    password="@$CiaG3008",
+    remote_path="/diadoc_connector",  # откуда копировать (обычно корень)
+    local_path="M:\Инвестиционный департамент\7.0 Treasury\Diadoc"  # куда сохранить
 )
