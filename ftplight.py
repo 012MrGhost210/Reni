@@ -5,11 +5,11 @@ import locale
 
 def main():
     # ====== НАСТРОЙКИ ======
-FTP_SERVER = "ftp.renlife.com"  # или IP адрес
-FTP_USER = "Ilya.Matveev2@mos.renlife.com"
-FTP_PASSWORD = "@$CiaG3008"
-FTP_FOLDER = "/diadoc_connector"   # папка на FTP
-LOCAL_FOLDER = r"M:\Инвестиционный департамент\7.0 Treasury\Diadoc" # куда сохранить
+    FTP_HOST = "ftp.renlife.com"      # например: 192.168.1.100
+    FTP_USER = "Ilya.Matveev2@mos.renlife.com"           # ваш логин
+    FTP_PASS = "@$CiaG3008"          # ваш пароль
+    FTP_FOLDER = "/diadoc_connector"                 # папка на FTP (начинается с /)
+    LOCAL_FOLDER = r"M:\Инвестиционный департамент\7.0 Treasury\Diadoc"      # куда копировать на M: диске
     # =======================
     
     print("=" * 70)
