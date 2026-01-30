@@ -1,164 +1,203 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+РАБОЧИЙ СКРИПТ ДЛЯ КОПИРОВАНИЯ ФАЙЛОВ С FTP
+"""
+
 import os
 import sys
+import ftplib
 from ftplib import FTP
-import locale
 
 def main():
-    # ====== НАСТРОЙКИ ======
-    FTP_HOST = "ftp.renlife.com"      # например: 192.168.1.100
-    FTP_USER = "Ilya.Matveev2@mos.renlife.com"           # ваш логин
-    FTP_PASS = "@$CiaG3008"          # ваш пароль
-    FTP_FOLDER = "/diadoc_connector"                 # папка на FTP (начинается с /)
-    LOCAL_FOLDER = r"M:\Инвестиционный департамент\7.0 Treasury\Diadoc"      # куда копировать на M: диске
-
-        
-#!/usr/bin/env python3
-"""
-ПРОСТОЙ МЕТОД - копирует всю папку FTP в локалку
-"""
-
-import os
-from ftplib import FTP
-
-def copy_ftp_directory(ftp_host, ftp_user, ftp_pass, remote_dir="/", local_dir="C:/FTP_COPY"):
-    """
-    Копирует всю папку с FTP сервера в локальную папку
+    # ====== ВАШИ ДАННЫЕ ======
+    FTP_HOST = "ftp.renlife.com"
+    FTP_USER = "Ilya.Matveev2@mos.renlife.com"
+    FTP_PASS = "кенгуруру"
+    FTP_FOLDER = "/diadoc_connector"
+    LOCAL_FOLDER = r"M:\Инвестиционный департамент\7.0 Treasury\Diadoc"
+    # =========================
     
-    Аргументы:
-    ftp_host - адрес FTP сервера
-    ftp_user - логин
-    ftp_pass - пароль
-    remote_dir - папка на FTP (по умолчанию корень /)
-    local_dir - куда копировать локально (по умолчанию C:/FTP_COPY)
-    """
+    print("=" * 70)
+    print("КОПИРОВАНИЕ ФАЙЛОВ С FTP")
+    print("=" * 70)
+    print(f"Сервер: {FTP_HOST}")
+    print(f"Папка на FTP: {FTP_FOLDER}")
+    print(f"Сохранить в: {LOCAL_FOLDER}")
+    print("-" * 70)
     
-    print(f"Копирую {remote_dir} с FTP -> {local_dir}")
+    # Настраиваем кодировку для Windows
+    if sys.platform == 'win32':
+        os.system('chcp 65001 > nul')
     
-    # Создаем локальную папку
-    os.makedirs(local_dir, exist_ok=True)
-    
-    # Подключаемся к FTP
-    ftp = FTP(ftp_host)
-    ftp.login(ftp_user, ftp_pass)
-    ftp.set_pasv(True)  # Важно для Windows
-    
-    # Внутренняя функция для рекурсивного копирования
-    def copy_current_dir(ftp_path, local_path):
-        """Копирует текущую директорию"""
-        # Переходим в папку на FTP
-        ftp.cwd(ftp_path)
-        
-        # Получаем список всего в текущей папке
-        items = ftp.nlst()
-        
-        for item in items:
-            if item in [".", ".."]:
-                continue
-            
-            # Пробуем определить, это папка или файл
-            try:
-                # Сохраняем текущую позицию
-                original_dir = ftp.pwd()
-                
-                # Пробуем перейти в элемент
-                try:
-                    ftp.cwd(item)
-                    # Если получилось - это папка
-                    
-                    # Создаем локальную папку
-                    local_item_path = os.path.join(local_path, item)
-                    os.makedirs(local_item_path, exist_ok=True)
-                    
-                    # Рекурсивно копируем папку
-                    print(f"Папка: {item}")
-                    copy_current_dir(f"{ftp_path}/{item}", local_item_path)
-                    
-                    # Возвращаемся назад
-                    ftp.cwd("..")
-                    
-                except:
-                    # Не получилось перейти - это файл
-                    local_item_path = os.path.join(local_path, item)
-                    
-                    print(f"Файл: {item}")
-                    
-                    # Скачиваем файл
-                    with open(local_item_path, 'wb') as f:
-                        ftp.retrbinary(f'RETR {item}', f.write)
-                        
-            except Exception as e:
-                print(f"Ошибка при обработке {item}: {e}")
-                continue
-    
-    # Запускаем копирование
+    # Создаем папку для сохранения
     try:
-        copy_current_dir(remote_dir, local_dir)
-        print(f"\n✅ Успешно скопировано в: {local_dir}")
+        os.makedirs(LOCAL_FOLDER, exist_ok=True)
+        print(f"✅ Создана папка: {LOCAL_FOLDER}")
     except Exception as e:
-        print(f"\n❌ Ошибка: {e}")
-    finally:
-        # Всегда закрываем соединение
+        print(f"❌ Ошибка создания папки: {e}")
+        input("Нажмите Enter...")
+        return
+    
+    # Подключаемся к FTP с разными кодировками
+    ftp = None
+    try:
+        print(f"🔌 Подключаюсь к {FTP_HOST}...")
+        
+        # Пробуем разные кодировки
+        for encoding in ['utf-8', 'cp1251', 'cp866', None]:
+            try:
+                ftp = FTP(FTP_HOST, timeout=30)
+                if encoding:
+                    ftp.encoding = encoding
+                
+                # Пробуем войти
+                ftp.login(FTP_USER, FTP_PASS)
+                ftp.set_pasv(True)
+                
+                print(f"✅ Подключение успешно! Кодировка: {encoding if encoding else 'default'}")
+                break
+                
+            except Exception as e:
+                if ftp:
+                    try:
+                        ftp.quit()
+                    except:
+                        pass
+                ftp = None
+                continue
+        
+        if ftp is None:
+            print("❌ Не удалось подключиться с любой кодировкой")
+            input("Нажмите Enter...")
+            return
+            
+    except Exception as e:
+        print(f"❌ Ошибка подключения: {e}")
+        input("Нажмите Enter...")
+        return
+    
+    # Переходим в нужную папку
+    try:
+        print(f"📂 Перехожу в папку: {FTP_FOLDER}")
+        ftp.cwd(FTP_FOLDER)
+    except Exception as e:
+        print(f"❌ Не могу перейти в папку: {e}")
         ftp.quit()
-
-# ========== ПРИМЕР ИСПОЛЬЗОВАНИЯ ==========
-if __name__ == "__main__":
-    # ВАШИ ДАННЫЕ FTP
-    FTP_HOST = "ftp.renlife.com"    # Например: 192.168.1.100 или ftp.site.com
-    FTP_USER = "Ilya.Matveev2@mos.renlife.com"         # Ваш логин для FTP
-    FTP_PASS = "@$CiaG3008"        # Ваш пароль
+        input("Нажмите Enter...")
+        return
     
-    # Откуда копировать на FTP (обычно / для всей папки)
-    REMOTE_PATH = "/diadoc_connector"
+    # Функция для копирования с обработкой ошибок
+    def safe_retrbinary(ftp, filename, fileobj, blocksize=8192):
+        """Безопасное скачивание файла"""
+        try:
+            ftp.retrbinary(f'RETR {filename}', fileobj.write, blocksize)
+            return True
+        except ftplib.error_perm as e:
+            print(f"    ⚠️  Ошибка доступа: {e}")
+            return False
+        except Exception as e:
+            print(f"    ⚠️  Другая ошибка: {e}")
+            return False
     
-    # Куда копировать локально
-    LOCAL_PATH = r"M:\Инвестиционный департамент\7.0 Treasury\Diadoc"  # Или "C:/FTP_COPY"
+    # Получаем список файлов
+    try:
+        print("📄 Получаю список файлов...")
+        items = ftp.nlst()
+        print(f"✅ Найдено элементов: {len(items)}")
+    except Exception as e:
+        print(f"❌ Ошибка получения списка: {e}")
+        ftp.quit()
+        input("Нажмите Enter...")
+        return
     
-    # Запускаем копирование
-    copy_ftp_directory(
-        ftp_host=FTP_HOST,
-        ftp_user=FTP_USER,
-        ftp_pass=FTP_PASS,
-        remote_dir=REMOTE_PATH,
-        local_dir=LOCAL_PATH
-    )
+    # Основной цикл копирования
+    success = 0
+    failed = 0
+    
+    print("\n" + "=" * 70)
+    print("НАЧИНАЮ КОПИРОВАНИЕ...")
+    print("=" * 70)
+    
+    for item in items:
+        if item in [".", ".."]:
+            continue
+        
+        # Пробуем разные декодирования для имени файла
+        filename_display = str(item)
+        
+        # Пробуем декодировать если это bytes
+        if isinstance(item, bytes):
+            for encoding in ['utf-8', 'cp1251', 'cp866', 'iso-8859-1']:
+                try:
+                    filename_display = item.decode(encoding)
+                    break
+                except:
+                    continue
+        
+        print(f"\n📝 Обрабатываю: {filename_display}")
+        
+        # Пробуем определить, это файл или папка
+        try:
+            # Пробуем получить размер файла
+            try:
+                size = ftp.size(item)
+            except:
+                size = None
+            
+            if size is not None:  # Это файл
+                print(f"   Размер: {size} байт")
+                
+                # Создаем безопасное имя файла
+                safe_name = filename_display
+                
+                # Заменяем недопустимые символы
+                invalid_chars = '<>:"/\\|?*'
+                for char in invalid_chars:
+                    safe_name = safe_name.replace(char, '_')
+                
+                # Полный путь для сохранения
+                local_path = os.path.join(LOCAL_FOLDER, safe_name)
+                
+                try:
+                    # Скачиваем файл
+                    with open(local_path, 'wb') as f:
+                        if safe_retrbinary(ftp, item, f):
+                            print(f"   ✅ Успешно сохранен как: {safe_name}")
+                            success += 1
+                        else:
+                            print(f"   ❌ Не удалось скачать")
+                            failed += 1
+                            
+                except Exception as e:
+                    print(f"   ❌ Ошибка файловой системы: {e}")
+                    failed += 1
+                    
+            else:  # Возможно папка
+                print(f"   ⚠️  Пропускаю (вероятно папка)")
+                
+        except Exception as e:
+            print(f"   ❌ Ошибка обработки: {e}")
+            failed += 1
+    
+    # Закрываем соединение
+    try:
+        ftp.quit()
+        print("\n🔌 Соединение закрыто")
+    except:
+        pass
+    
+    # Итоги
+    print("\n" + "=" * 70)
+    print("КОПИРОВАНИЕ ЗАВЕРШЕНО!")
+    print("=" * 70)
+    print(f"📊 ИТОГО:")
+    print(f"   ✅ Успешно: {success} файлов")
+    print(f"   ❌ Ошибок: {failed} файлов")
+    print(f"   📂 Папка: {LOCAL_FOLDER}")
+    print("=" * 70)
     
     input("\nНажмите Enter для выхода...")
 
-
-брабатываю: ???????????
-   Сохраняю как: ___________
-   ⚙️  Пропускаю элемент
-
-📝 Обрабатываю: ??????????????? ????????
-   Сохраняю как: _______________ ________
-   ⚙️  Пропускаю элемент
-
-📝 Обрабатываю: ????????
-   Сохраняю как: ________
-   ⚙️  Пропускаю элемент
-
-📝 Обрабатываю: ????????? ?????????????
-   Сохраняю как: _________ _____________
-   ⚙️  Пропускаю элемент
-
-📝 Обрабатываю: ????????? ???????
-   Сохраняю как: _________ _______
-   ⚙️  Пропускаю элемент
-Traceback (most recent call last):
-  File "c:/Users/Ilya.Matveev2/Скрипты/Files redactor/ftp light.py", line 193, in <module>
+if __name__ == "__main__":
     main()
-  File "c:/Users/Ilya.Matveev2/Скрипты/Files redactor/ftp light.py", line 178, in main
-    ftp.quit()
-  File "C:\Program Files\Python38\lib\ftplib.py", line 655, in quit
-    resp = self.voidcmd('QUIT')
-  File "C:\Program Files\Python38\lib\ftplib.py", line 282, in voidcmd
-    return self.voidresp()
-  File "C:\Program Files\Python38\lib\ftplib.py", line 255, in voidresp
-    resp = self.getresp()
-  File "C:\Program Files\Python38\lib\ftplib.py", line 240, in getresp
-    resp = self.getmultiline()
-  File "C:\Program Files\Python38\lib\ftplib.py", line 226, in getmultiline
-    line = self.getline()
-  File "C:\Program Files\Python38\lib\ftplib.py", line 214, in getline
-    raise EOFError
-EOFError
