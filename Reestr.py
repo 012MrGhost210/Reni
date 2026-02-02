@@ -58,12 +58,9 @@ CREATE_HYPERLINKS = True
 # Открывать ли Excel файл после создания
 OPEN_EXCEL_AFTER_CREATION = True
 
-# Сохранять ли файлы, не соответствующие фильтрам (если фильтры включены)
-SAVE_NON_MATCHING_FILES = True  # True - сохранять все файлы, False - только соответствующие фильтрам
-
 # ==================== КОНЕЦ НАСТРОЕК ====================
 
-def format_excel_file(worksheet, total_rows):
+def format_excel_file(worksheet, total_rows, enable_filter):
     """
     Форматирует Excel файл: настраивает ширину столбцов, стили, гиперссылки
     """
@@ -74,7 +71,7 @@ def format_excel_file(worksheet, total_rows):
         'C': 25,   # Дата изменения
         'D': 100,  # Полный путь
         'E': 30,   # Источник (папка поиска)
-        'F': 50,   # Найденные ключевые слова
+        'F': 50,   # Найденные ключевые слова (если фильтр включен)
     }
     
     for col, width in column_widths.items():
@@ -138,11 +135,11 @@ def format_excel_file(worksheet, total_rows):
     worksheet.conditional_formatting.add(date_range, old_rule)
     
     # Форматирование для файлов, соответствующих фильтрам (если фильтры включены)
-    if ENABLE_KEYWORD_FILTER and not SAVE_NON_MATCHING_FILES:
+    if enable_filter:
         match_fill = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")
         for row in range(2, total_rows + 2):
             keyword_cell = worksheet.cell(row=row, column=6)  # Колонка F
-            if keyword_cell.value and keyword_cell.value != "Нет совпадений":
+            if keyword_cell.value and keyword_cell.value != "Нет совпадений" and keyword_cell.value != "Фильтр отключен":
                 for col in range(1, 7):
                     worksheet.cell(row=row, column=col).fill = match_fill
 
@@ -190,7 +187,18 @@ def check_keywords_match(file_path, filename, keywords, case_sensitive, search_i
     
     return matched_keywords
 
-def create_excel_report(files_data, output_path, total_processed, total_found):
+def should_save_file(matched_keywords, enable_filter):
+    """
+    Определяет, нужно ли сохранять файл в отчете
+    """
+    if not enable_filter:
+        # Если фильтр отключен - сохраняем ВСЕ файлы
+        return True
+    else:
+        # Если фильтр включен - сохраняем только файлы с ключевыми словами
+        return bool(matched_keywords)
+
+def create_excel_report(files_data, output_path, total_processed, matching_files, enable_filter):
     """
     Создает Excel файл со списком файлов с гиперссылками
     """
@@ -198,7 +206,7 @@ def create_excel_report(files_data, output_path, total_processed, total_found):
         # Создаем новую рабочую книгу
         workbook = Workbook()
         worksheet = workbook.active
-        worksheet.title = "Все файлы"
+        worksheet.title = "Все файлы" if not enable_filter else "Отфильтрованные файлы"
         
         # Добавляем заголовки
         headers = [
@@ -207,7 +215,7 @@ def create_excel_report(files_data, output_path, total_processed, total_found):
             "Дата изменения", 
             "Полный путь",
             "Источник (папка)",
-            "Найденные ключевые слова"
+            "Найденные ключевые слова" if enable_filter else "Примечание"
         ]
         
         for col, header in enumerate(headers, 1):
@@ -238,18 +246,15 @@ def create_excel_report(files_data, output_path, total_processed, total_found):
             # Источник (папка поиска)
             worksheet.cell(row=row_idx, column=5, value=source_dir)
             
-            # Найденные ключевые слова
-            if matched_keywords:
-                keywords_str = ", ".join(matched_keywords)
-                worksheet.cell(row=row_idx, column=6, value=keywords_str)
-                
-                # Подсвечиваем строку если найдены ключевые слова
-                if ENABLE_KEYWORD_FILTER:
-                    fill = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")
-                    for col in range(1, 7):
-                        worksheet.cell(row=row_idx, column=col).fill = fill
+            # Колонка с ключевыми словами или примечанием
+            if enable_filter:
+                if matched_keywords:
+                    keywords_str = ", ".join(matched_keywords)
+                    worksheet.cell(row=row_idx, column=6, value=keywords_str)
+                else:
+                    worksheet.cell(row=row_idx, column=6, value="Нет совпадений")
             else:
-                worksheet.cell(row=row_idx, column=6, value="Нет совпадений")
+                worksheet.cell(row=row_idx, column=6, value="Фильтр отключен")
             
             # Создаем гиперссылки если нужно
             if CREATE_HYPERLINKS:
@@ -263,7 +268,7 @@ def create_excel_report(files_data, output_path, total_processed, total_found):
         
         # Применяем форматирование
         total_rows = len(files_data)
-        format_excel_file(worksheet, total_rows)
+        format_excel_file(worksheet, total_rows, enable_filter)
         
         # Добавляем информационные строки
         info_row = total_rows + 3
@@ -274,15 +279,19 @@ def create_excel_report(files_data, output_path, total_processed, total_found):
         worksheet.cell(row=info_row, column=1).font = Font(bold=True, size=12)
         
         info_row += 1
-        if ENABLE_KEYWORD_FILTER:
+        if enable_filter:
             worksheet.cell(row=info_row, column=1, 
-                          value=f"Соответствует фильтрам: {total_found}")
+                          value=f"Соответствует фильтрам: {matching_files} ({matching_files/total_processed*100:.1f}%)")
             worksheet.cell(row=info_row, column=1).font = Font(bold=True, color="00B050", size=12)
             
             info_row += 1
             keywords_str = ", ".join(KEYWORDS) if KEYWORDS else "не заданы"
             worksheet.cell(row=info_row, column=1, 
                           value=f"Ключевые слова: {keywords_str}")
+        else:
+            worksheet.cell(row=info_row, column=1, 
+                          value=f"Режим: полный анализ всех файлов (фильтр отключен)")
+            worksheet.cell(row=info_row, column=1).font = Font(bold=True, color="4472C4", size=12)
         
         # Инструкция по гиперссылкам
         if CREATE_HYPERLINKS:
@@ -360,7 +369,9 @@ def analyze_directory_files():
         print(f"   Ключевые слова: {keywords_str}")
         print(f"   Чувствительность к регистру: {'Да' if CASE_SENSITIVE_SEARCH else 'Нет'}")
         print(f"   Искать только в именах файлов: {'Да' if SEARCH_IN_FILENAME_ONLY else 'Нет'}")
-        print(f"   Сохранять все файлы: {'Да' if SAVE_NON_MATCHING_FILES else 'Нет'}")
+        print(f"   Режим: ТОЛЬКО файлы с ключевыми словами")
+    else:
+        print(f"   Режим: ВСЕ файлы")
     
     print(f"🔗 Гиперссылки: {'ВКЛЮЧЕНЫ' if CREATE_HYPERLINKS else 'ВЫКЛЮЧЕНЫ'}")
     print(f"📊 Отчет будет сохранен: {excel_path}")
@@ -409,9 +420,7 @@ def analyze_directory_files():
                         )
                     
                     # Определяем, нужно ли сохранять этот файл
-                    should_save = True
-                    if ENABLE_KEYWORD_FILTER and not SAVE_NON_MATCHING_FILES:
-                        should_save = bool(matched_keywords)
+                    should_save = should_save_file(matched_keywords, ENABLE_KEYWORD_FILTER)
                     
                     if should_save:
                         # Добавляем информацию в список
@@ -447,7 +456,7 @@ def analyze_directory_files():
         print("\n" + "-" * 80)
         print("📈 СОЗДАНИЕ ОТЧЕТА...")
         
-        success = create_excel_report(files_data, excel_path, total_processed, matching_files)
+        success = create_excel_report(files_data, excel_path, total_processed, matching_files, ENABLE_KEYWORD_FILTER)
         
         print("-" * 80)
         print("🎯 ИТОГОВЫЕ РЕЗУЛЬТАТЫ:")
@@ -456,12 +465,9 @@ def analyze_directory_files():
         
         if ENABLE_KEYWORD_FILTER:
             print(f"   🔍 Соответствует фильтрам: {matching_files} ({matching_files/total_processed*100:.1f}%)")
-            if SAVE_NON_MATCHING_FILES:
-                print(f"   📋 Все файлы сохранены в отчет")
-            else:
-                print(f"   📋 Только соответствующие фильтрам сохранены в отчет")
-        
-        print(f"   💾 Записей в Excel: {len(files_data)}")
+            print(f"   📋 Записей в Excel (только с ключевыми словами): {len(files_data)}")
+        else:
+            print(f"   📋 Записей в Excel (все файлы): {len(files_data)}")
         
         if success:
             print(f"\n   ✅ Excel отчет успешно создан: {excel_path}")
@@ -478,7 +484,9 @@ def analyze_directory_files():
         else:
             print("   ❌ Не удалось создать Excel отчет")
     else:
-        print("\nℹ️  Не найдено файлов, соответствующих критериям.")
+        print("\nℹ️  Не найдено файлов.")
+        if ENABLE_KEYWORD_FILTER:
+            print("   Попробуйте изменить ключевые слова или отключить фильтрацию.")
     
     print("=" * 80)
 
