@@ -167,3 +167,20 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+PS C:\Users\Ilya.Matveev2> & "C:/Program Files/Python38/python.exe" c:/Users/Ilya.Matveev2/Scripts/fond.py     
+Traceback (most recent call last):
+  File "c:/Users/Ilya.Matveev2/Scripts/fond.py", line 169, in <module>
+    main()
+  File "c:/Users/Ilya.Matveev2/Scripts/fond.py", line 162, in main
+    parser = ExcelParser(input_folder, None)
+  File "c:/Users/Ilya.Matveev2/Scripts/fond.py", line 18, in __init__
+    self.output_file = Path(output_file)
+  File "C:\Program Files\Python38\lib\pathlib.py", line 1042, in __new__
+    self = cls._from_parts(args, init=False)
+  File "C:\Program Files\Python38\lib\pathlib.py", line 683, in _from_parts
+    drv, root, parts = self._parse_args(args)
+  File "C:\Program Files\Python38\lib\pathlib.py", line 667, in _parse_args
+    a = os.fspath(a)
+TypeError: expected str, bytes or os.PathLike object, not NoneType
