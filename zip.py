@@ -4,7 +4,7 @@ from pathlib import Path
 import shutil
 
 # Пути
-search_path = r"\\fs-01.renlife.com\alldocs\Инвестиционный департамент\7.0 Treasury\01.Перечень имущества Фонда (СД)"
+search_path = r"Q:\Финансовый отдел\01.Перечень имущества Фонда (СД)"
 output_path = r"\\fs-01.renlife.com\alldocs\Инвестиционный департамент\7.0 Treasury\Фонд СЧА"
 
 print("="*80)
