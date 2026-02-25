@@ -14,8 +14,25 @@ print(f"Ищем в: {search_path}")
 print(f"Сохраняем в: {output_path}")
 print("="*80)
 
-# Создаем папку для сохранения
-Path(output_path).mkdir(exist_ok=True)
+# ОЧИСТКА выходной папки перед началом
+output_dir = Path(output_path)
+if output_dir.exists():
+    print(f"\n🧹 Очищаем папку: {output_path}")
+    try:
+        # Удаляем все содержимое папки
+        for item in output_dir.iterdir():
+            if item.is_file():
+                item.unlink()
+            elif item.is_dir():
+                shutil.rmtree(item)
+        print(f"   ✅ Папка очищена")
+    except Exception as e:
+        print(f"   ⚠️ Ошибка при очистке: {e}")
+else:
+    print(f"\n📁 Создаем папку: {output_path}")
+
+# Создаем папку для сохранения (если её нет)
+output_dir.mkdir(exist_ok=True)
 
 # Счетчики
 total_archives = 0
@@ -134,5 +151,3 @@ print(f"Проверено архивов: {total_archives}")
 print(f"Найдено файлов: {total_files}")
 print(f"Все файлы сохранены в: {output_path}")
 print("="*80)
-
-input("\nНажмите Enter для выхода...")
