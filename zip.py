@@ -32,27 +32,23 @@ class SCAFileFinder:
         }
         
     def find_files(self):
-        """Поиск файлов по точному паттерну: ДД.ММ.ГГГГ_СЧА Фонд_ПДС.xls"""
+        """Поиск файлов содержащих 'СЧА Фонд_ПДС' в названии"""
         
         self.logger.info("="*80)
         self.logger.info("🚀 ЗАПУСК ПОИСКА ФАЙЛОВ СЧА Фонд_ПДС")
         self.logger.info("="*80)
         self.logger.info(f"📂 Ищем в: {self.network_path}")
         self.logger.info(f"📁 Сохраняем в: {self.output_folder}")
-        self.logger.info("-"*80)
+        self.logger.info("="*80)
         
         # Проверяем доступность исходного пути
         if not self.network_path.exists():
             self.logger.error(f"❌ Исходный путь не существует: {self.network_path}")
-            self.logger.error("   Проверьте подключение к сетевому диску")
             return False
         
-        # ТОЧНЫЙ ПАТТЕРН ПОИСКА - только такой формат:
-        # ДД.ММ.ГГГГ_СЧА Фонд_ПДС.xls
-        date_pattern = r'\d{2}\.\d{2}\.\d{4}'  # 29.12.2025
-        exact_filename = f"{date_pattern}_СЧА Фонд_ПДС\\.xls"
-        
-        self.logger.info(f"🔍 Ищем файлы по паттерну: ДД.ММ.ГГГГ_СЧА Фонд_ПДС.xls")
+        # ПРОСТОЙ ПОИСК - ищем фразу в названии файла
+        search_string = "СЧА Фонд_ПДС"
+        self.logger.info(f"🔍 Ищем файлы содержащие: '{search_string}'")
         self.logger.info("-"*80)
         
         # Получаем все папки с датами
@@ -68,17 +64,13 @@ class SCAFileFinder:
             guarant_folder = date_folder / "Документы от Гаранта СД НТД"
             
             if not guarant_folder.exists():
-                self.logger.info(f"📂 {date_folder.name}: пропускаем (нет папки гаранта)")
                 continue
             
             # Ищем ZIP архивы
             zip_files = list(guarant_folder.glob("Отчеты_*.zip"))
             
             if not zip_files:
-                self.logger.info(f"📂 {date_folder.name}: нет архивов")
                 continue
-            
-            self.logger.info(f"\n📂 Папка: {date_folder.name} (архивов: {len(zip_files)})")
             
             for zip_path in zip_files:
                 self.stats['archives_checked'] += 1
@@ -95,26 +87,22 @@ class SCAFileFinder:
                                 
                             file_name = Path(file_in_zip).name
                             
-                            # Проверяем точное совпадение с паттерном
-                            if re.match(exact_filename, file_name):
+                            # ПРОСТАЯ ПРОВЕРКА - содержит ли имя файла искомую фразу
+                            if search_string in file_name:
                                 found_in_this_archive = True
                                 self.stats['files_found'] += 1
                                 
-                                self.logger.info(f"  📦 {zip_path.name}")
+                                # Выводим информацию о находке
+                                self.logger.info(f"\n📂 Папка: {date_folder.name}")
+                                self.logger.info(f"  📦 Архив: {zip_path.name}")
                                 self.logger.info(f"     ✅ НАЙДЕН: {file_name}")
                                 
-                                # Сохраняем файл с префиксом из даты папки
+                                # Сохраняем файл
                                 self._save_file(zf, file_in_zip, date_folder.name, file_name)
                         
-                        if not found_in_this_archive:
-                            self.logger.info(f"  📦 {zip_path.name}: файл не найден")
-                            
-                except zipfile.BadZipFile:
-                    self.stats['errors'] += 1
-                    self.logger.error(f"  📦 {zip_path.name}: ❌ испорченный ZIP")
                 except Exception as e:
                     self.stats['errors'] += 1
-                    self.logger.error(f"  📦 {zip_path.name}: ❌ ошибка {e}")
+                    self.logger.error(f"  ❌ Ошибка при обработке {zip_path.name}: {e}")
         
         # Выводим статистику
         self._print_statistics()
@@ -126,40 +114,49 @@ class SCAFileFinder:
         return self.stats['files_found'] > 0
     
     def _save_file(self, zip_file, file_in_zip, folder_name, original_filename):
-        """Сохранение найденного файла с префиксом из папки"""
+        """Сохранение найденного файла"""
         try:
             # Добавляем дату папки в начало имени для уникальности
-            # Папка 2026_01_12 -> префикс [2026-01-12]
             folder_date = folder_name.replace('_', '-')
-            new_filename = f"[{folder_date}]_{original_filename}"
+            
+            # Разделяем имя и расширение
+            name_parts = original_filename.rsplit('.', 1)
+            if len(name_parts) == 2:
+                file_base = name_parts[0]
+                file_ext = name_parts[1]
+                new_filename = f"[{folder_date}]_{file_base}.{file_ext}"
+            else:
+                new_filename = f"[{folder_date}]_{original_filename}"
             
             # Проверяем уникальность имени
             counter = 1
             save_path = self.output_folder / new_filename
             
             while save_path.exists():
-                name_parts = new_filename.rsplit('.', 1)
                 if len(name_parts) == 2:
-                    new_filename = f"{name_parts[0]}_{counter}.{name_parts[1]}"
+                    new_filename = f"[{folder_date}]_{file_base}_{counter}.{file_ext}"
                 else:
-                    new_filename = f"{new_filename}_{counter}"
+                    new_filename = f"[{folder_date}]_{original_filename}_{counter}"
                 save_path = self.output_folder / new_filename
                 counter += 1
             
-            # Создаем временную папку для распаковки
-            temp_extract = self.output_folder / "_temp"
-            temp_extract.mkdir(exist_ok=True)
-            
             # Извлекаем файл
-            zip_file.extract(file_in_zip, temp_extract)
+            zip_file.extract(file_in_zip, self.output_folder)
             
-            # Перемещаем с новым именем
-            extracted_path = temp_extract / file_in_zip
-            if extracted_path.exists():
-                shutil.move(extracted_path, save_path)
-            
-            # Удаляем временную папку
-            shutil.rmtree(temp_extract, ignore_errors=True)
+            # Если файл извлекся в подпапку, перемещаем в корень
+            extracted_path = self.output_folder / file_in_zip
+            if extracted_path != save_path:
+                if extracted_path.exists():
+                    shutil.move(extracted_path, save_path)
+                
+                # Удаляем пустые папки
+                temp_dir = self.output_folder / Path(file_in_zip).parent
+                while temp_dir != self.output_folder:
+                    try:
+                        temp_dir.rmdir()
+                        temp_dir = temp_dir.parent
+                    except:
+                        break
             
             self.logger.info(f"        💾 Сохранен как: {save_path.name}")
             
@@ -180,22 +177,28 @@ class SCAFileFinder:
             self.logger.info(f"\n📁 Все файлы сохранены в:")
             self.logger.info(f"   {self.output_folder}")
             
-            # Показываем первые несколько файлов
-            saved_files = list(self.output_folder.glob("[*]*.xls"))
+            # Показываем список найденных файлов
+            saved_files = list(self.output_folder.glob("*.xls*"))
+            saved_files.extend(self.output_folder.glob("*.[0-9]*"))  # на случай если нет расширения
+            saved_files = [f for f in saved_files if f.is_file()]
+            saved_files.sort()
+            
             if saved_files:
-                self.logger.info(f"\n📋 Примеры сохраненных файлов:")
-                for i, file_path in enumerate(saved_files[:5], 1):
-                    self.logger.info(f"   {i}. {file_path.name}")
-        else:
-            self.logger.warning("\n❌ Файлы не найдены!")
-            self.logger.warning("   Проверьте вручную один архив:")
-            self.logger.warning("   - Откройте любой архив")
-            self.logger.warning("   - Посмотрите точное название файла")
+                self.logger.info(f"\n📋 Найденные файлы ({len(saved_files)}):")
+                for i, file_path in enumerate(saved_files[:10], 1):
+                    self.logger.info(f"   {i:2d}. {file_path.name}")
+                if len(saved_files) > 10:
+                    self.logger.info(f"       ... и еще {len(saved_files) - 10} файлов")
     
     def _create_summary_file(self):
         """Создает файл с кратким отчетом"""
         try:
             summary_file = self.output_folder / "!_ОТЧЕТ_О_НАЙДЕННЫХ_ФАЙЛАХ.txt"
+            
+            saved_files = list(self.output_folder.glob("*.xls*"))
+            saved_files.extend(self.output_folder.glob("*.[0-9]*"))
+            saved_files = [f for f in saved_files if f.is_file()]
+            saved_files.sort()
             
             with open(summary_file, 'w', encoding='utf-8') as f:
                 f.write("="*60 + "\n")
@@ -203,12 +206,9 @@ class SCAFileFinder:
                 f.write(f"Дата поиска: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}\n")
                 f.write("="*60 + "\n\n")
                 
-                f.write(f"Всего найдено файлов: {self.stats['files_found']}\n\n")
+                f.write(f"Всего найдено файлов: {len(saved_files)}\n\n")
                 f.write("Список найденных файлов:\n")
                 f.write("-"*40 + "\n")
-                
-                saved_files = list(self.output_folder.glob("[*]*.xls"))
-                saved_files.sort()
                 
                 for i, file_path in enumerate(saved_files, 1):
                     f.write(f"{i:3d}. {file_path.name}\n")
@@ -236,30 +236,25 @@ def main():
     
     # Проверяем доступность путей
     search_path_obj = Path(search_path)
-    output_path_obj = Path(output_path)
     
     if not search_path_obj.exists():
         print("\n❌ ОШИБКА: Не удалось подключиться к исходной папке!")
         print(f"   Путь: {search_path}")
-        print("\nВозможные решения:")
-        print("1. Проверьте подключение к VPN")
-        print("2. Откройте папку в проводнике чтобы убедиться в доступе")
-        print("3. Запустите скрипт от имени другого пользователя")
+        print("\nПроверьте:")
+        print("1. Подключение к VPN")
+        print("2. Откройте папку в проводнике")
         input("\nНажмите Enter для выхода...")
         return
     
     # Создаем и запускаем поисковик
     finder = SCAFileFinder(search_path, output_path)
-    files_found = finder.find_files()
+    finder.find_files()
     
     print("\n" + "="*80)
-    if files_found:
-        print(f"✅ РАБОТА ЗАВЕРШЕНА. Найдено файлов: {finder.stats['files_found']}")
-    else:
-        print("❌ РАБОТА ЗАВЕРШЕНА. Файлы не найдены.")
+    print("✅ РАБОТА ЗАВЕРШЕНА")
     print("="*80)
-    print(f"📁 Папка для сохранения: {output_path}")
-    print("\nЛог работы сохранен в файл: sca_finder.log")
+    print(f"📁 Все файлы сохранены в: {output_path}")
+    print("\n📄 Подробный лог: sca_finder.log")
     
     input("\nНажмите Enter для выхода...")
 
