@@ -1,6 +1,12 @@
 import pandas as pd
 import os
 import glob
+import re
+
+def natural_sort_key(sheet_name):
+    """Функция для естественной сортировки (148, 149, 7757, 7758, 8602)"""
+    return [int(text) if text.isdigit() else text.lower() 
+            for text in re.split('([0-9]+)', sheet_name)]
 
 # Путь к папке Documents
 docs_path = r'C:\Users\ytggf\OneDrive\Документы'
@@ -23,6 +29,10 @@ if found_files:
         sheet_names = excel_file.sheet_names
         print(f"Найдены листы: {sheet_names}")
         
+        # Сортируем листы в естественном порядке
+        sheet_names.sort(key=natural_sort_key)
+        print(f"Листы после сортировки: {sheet_names}")
+        
         # Словари для хранения данных
         scha_data = {}  # для СЧА
         inout_data = {}  # для вводов-выводов
@@ -36,9 +46,6 @@ if found_files:
                 # Убираем полностью пустые колонки
                 df = df.dropna(axis=1, how='all')
                 
-                # Смотрим сколько колонок осталось
-                print(f"\nЛист '{sheet}' - колонок после очистки: {len(df.columns)}")
-                
                 # Если осталось 7 колонок - используем наши названия
                 if len(df.columns) == 7:
                     df.columns = ['№', 'Date', 'Вводы', 'Выводы', 'РСА', 'СЧА', 'Пусто']
@@ -47,7 +54,7 @@ if found_files:
                 elif len(df.columns) == 6:
                     df.columns = ['№', 'Date', 'Вводы', 'Выводы', 'РСА', 'СЧА']
                 else:
-                    print(f"  Неожиданное количество колонок: {len(df.columns)}")
+                    print(f"  Лист '{sheet}' пропущен: неожиданное кол-во колонок {len(df.columns)}")
                     continue
                 
                 # Удаляем пустые строки
@@ -97,7 +104,8 @@ if found_files:
             # Функция для объединения данных
             def combine_data(data_dict):
                 if data_dict:
-                    sheets_list = list(data_dict.keys())
+                    # Получаем отсортированный список ключей
+                    sheets_list = sorted(data_dict.keys(), key=natural_sort_key)
                     result = data_dict[sheets_list[0]]
                     
                     for sheet in sheets_list[1:]:
@@ -121,10 +129,12 @@ if found_files:
                 if scha_result is not None:
                     scha_result.to_excel(writer, sheet_name='СЧА', index=False)
                     print(f"\n✅ Лист СЧА: {len(scha_result)} строк")
+                    print(f"   Колонки: {list(scha_result.columns)}")
                 
                 if inout_result is not None:
                     inout_result.to_excel(writer, sheet_name='InOut', index=False)
                     print(f"✅ Лист InOut: {len(inout_result)} строк")
+                    print(f"   Колонки: {list(inout_result.columns)}")
             
             print(f"\n✅ Готово! Файл сохранен: {output_path}")
             
