@@ -38,7 +38,7 @@ def save_to_registry(deposits_data, total_amount):
         # Открываем файл для записи с помощью openpyxl
         from openpyxl import load_workbook
         from openpyxl.styles import numbers
-        from datetime import datetime
+        from datetime import datetime, date
         
         if os.path.exists(REGISTRY_FILE_PATH):
             wb = load_workbook(REGISTRY_FILE_PATH)
@@ -61,7 +61,7 @@ def save_to_registry(deposits_data, total_amount):
         # Запоминаем первую строку для применения формата
         first_row = current_row
         
-        today_date = datetime.now()
+        today_date = date.today()  # Используем date вместо datetime
         
         # Записываем данные для каждого депозита
         for i, deposit in enumerate(deposits_data):
@@ -73,18 +73,17 @@ def save_to_registry(deposits_data, total_amount):
             rate_value = float(rate_str) / 100
             ws.cell(row=current_row, column=5, value=rate_value)
             
-            # Столбец H (8) - Размещение (сегодня)
+            # Столбец H (8) - Размещение (сегодня) - ТОЛЬКО ДАТА
             ws.cell(row=current_row, column=8, value=today_date)
             
-            # Столбец I (9) - Окончание
+            # Столбец I (9) - Окончание - ТОЛЬКО ДАТА
             # Преобразуем строку с датой
             date_str = deposit['date'].strip()
             
-            # Пробуем распарсить дату из формата ДД.ММ.ГГГГ
             try:
                 # Разбиваем строку на день, месяц, год
                 day, month, year = map(int, date_str.split('.'))
-                date_obj = datetime(year, month, day)
+                date_obj = date(year, month, day)  # Используем date вместо datetime
                 
                 # Записываем как дату
                 ws.cell(row=current_row, column=9, value=date_obj)
@@ -106,7 +105,7 @@ def save_to_registry(deposits_data, total_amount):
             
             # Формат для столбца I (окончание)
             cell_i = ws.cell(row=row, column=9)
-            if isinstance(cell_i.value, datetime):
+            if isinstance(cell_i.value, (datetime, date)):
                 cell_i.number_format = 'DD.MM.YYYY'
         
         # Сохраняем файл
