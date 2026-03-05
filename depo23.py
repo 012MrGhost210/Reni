@@ -37,6 +37,7 @@ def save_to_registry(deposits_data, total_amount):
     try:
         # Открываем файл для записи с помощью openpyxl чтобы сохранить форматирование
         from openpyxl import load_workbook
+        from datetime import datetime
         
         if os.path.exists(REGISTRY_FILE_PATH):
             wb = load_workbook(REGISTRY_FILE_PATH)
@@ -56,7 +57,7 @@ def save_to_registry(deposits_data, total_amount):
         while ws.cell(row=current_row, column=4).value is not None:  # Столбец D
             current_row += 1
         
-        today_date = datetime.now().strftime('%d.%m.%Y')
+        today_date = datetime.now()
         
         # Записываем данные для каждого депозита
         for i, deposit in enumerate(deposits_data):
@@ -71,9 +72,25 @@ def save_to_registry(deposits_data, total_amount):
             ws.cell(row=current_row, column=8, value=today_date)
             
             # Столбец I (9) - Окончание (в формате ДД.ММ.ГГГГ)
-            # Преобразуем дату из формата ДД.ММ.ГГГГ в тот же формат
-            end_date = deposit['date']
-            ws.cell(row=current_row, column=9, value=end_date)
+            # Преобразуем строку с датой в объект datetime
+            try:
+                # Парсим дату из формата ДД.ММ.ГГГГ
+                end_date_str = deposit['date']
+                # Пробуем разные форматы
+                for fmt in ['%d.%m.%Y', '%d/%m/%Y', '%Y-%m-%d']:
+                    try:
+                        end_date = datetime.strptime(end_date_str, fmt)
+                        break
+                    except ValueError:
+                        continue
+                else:
+                    # Если ни один формат не подошел, используем строку как есть
+                    end_date = end_date_str
+                
+                ws.cell(row=current_row, column=9, value=end_date)
+            except Exception as e:
+                # В случае ошибки записываем как строку
+                ws.cell(row=current_row, column=9, value=deposit['date'])
             
             current_row += 1
         
