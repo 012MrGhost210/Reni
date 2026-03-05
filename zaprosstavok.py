@@ -3,55 +3,54 @@ import pythoncom
 import os
 
 # Конфигурация
-STOP_FILE = r"D:\мои_письма\stop.txt"  # Путь к файлу-флагу
-TARGET_FOLDER = "Мои готовые письма"    # Имя папки в Outlook
+DRAFTS_FOLDER = r"D:\мои_письма"  # Папка с .msg файлами
+STOP_FILE = r"D:\мои_письма\stop.txt"  # Файл-флаг
 
-def send_from_specific_folder():
-    """Отправляет письма из конкретной папки Outlook"""
+def send_msg_files():
+    """Отправляет .msg файлы из указанной папки"""
     
-    # Проверяем stop файл
+    # Проверяем stop.txt
     if os.path.exists(STOP_FILE):
-        print(f"Найден {STOP_FILE}, отправка пропущена")
+        print(f"Найден {STOP_FILE}, отправка отменена")
         return
     
-    print(f"Поиск папки '{TARGET_FOLDER}'...")
+    print(f"Поиск .msg файлов в {DRAFTS_FOLDER}...")
     
     try:
+        # Подключаемся к Outlook
         pythoncom.CoInitialize()
         outlook = win32com.client.Dispatch("Outlook.Application")
-        namespace = outlook.GetNamespace("MAPI")
         
-        # Ищем нужную папку
-        target_folder = None
+        # Находим все .msg файлы
+        msg_files = [f for f in os.listdir(DRAFTS_FOLDER) if f.lower().endswith('.msg')]
         
-        # Поиск во всех почтовых ящиках
-        for store in namespace.Folders:
-            for folder in store.Folders:
-                if folder.Name == TARGET_FOLDER:
-                    target_folder = folder
-                    break
-            if target_folder:
-                break
-        
-        if not target_folder:
-            print(f"Папка '{TARGET_FOLDER}' не найдена")
+        if not msg_files:
+            print("Нет .msg файлов для отправки")
+            # Создаем stop.txt даже если файлов нет
+            with open(STOP_FILE, 'w') as f:
+                f.write("No files found")
             return
         
-        print(f"Папка найдена, начинаем отправку...")
+        print(f"Найдено файлов: {len(msg_files)}")
         
         sent_count = 0
         
-        # Отправляем все письма из папки
-        for item in target_folder.Items:
-            if item.Class == 43:  # Письмо
-                try:
-                    item.Send()
-                    sent_count += 1
-                    print(f"✓ {sent_count}. {item.Subject}")
-                except Exception as e:
-                    print(f"✗ Ошибка: {e}")
+        # Отправляем каждый файл
+        for filename in msg_files:
+            filepath = os.path.join(DRAFTS_FOLDER, filename)
+            try:
+                # Открываем .msg файл в Outlook
+                msg = outlook.CreateItemFromTemplate(filepath)
+                
+                # Отправляем
+                msg.Send()
+                sent_count += 1
+                print(f"✓ Отправлено: {filename}")
+                
+            except Exception as e:
+                print(f"✗ Ошибка с {filename}: {e}")
         
-        print(f"\nОтправлено писем: {sent_count}")
+        print(f"\nВсего отправлено: {sent_count}")
         
         # Создаем stop.txt
         with open(STOP_FILE, 'w') as f:
@@ -65,4 +64,4 @@ def send_from_specific_folder():
         pythoncom.CoUninitialize()
 
 if __name__ == "__main__":
-    send_from_specific_folder()
+    send_msg_files()
