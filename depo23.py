@@ -6,7 +6,7 @@ from datetime import datetime
 
 # ФИКСИРОВАННЫЕ ПУТИ К ФАЙЛАМ
 FILE1_PATH = r"M:\Финансовый департамент\Treasury\Базы данных(автоматизация)\DI_DATABASE\Депозит.xlsx"
-REGISTRY_FILE_PATH = r"\\fs-01.renlife.com\alldocs\Инвестиционный департамент\7.0 Treasury\BigData\Deposit.xlsx"  # ЗАМЕНИТЕ НА ВАШ ПУТЬ
+REGISTRY_FILE_PATH = r"\\fs-01.renlife.com\alldocs\Инвестиционный департамент\7.0 Treasury\BigData\Deposit.xlsx"
 
 def parse_number(text):
     """Преобразует строку с числами в формате '12 122 121,31' в float"""
@@ -35,8 +35,9 @@ def calculate_days_until(target_date_str):
 def save_to_registry(deposits_data, total_amount):
     """Сохраняет данные о депозитах в реестр"""
     try:
-        # Открываем файл для записи с помощью openpyxl чтобы сохранить форматирование
+        # Открываем файл для записи с помощью openpyxl
         from openpyxl import load_workbook
+        from openpyxl.styles import numbers
         from datetime import datetime
         
         if os.path.exists(REGISTRY_FILE_PATH):
@@ -57,49 +58,70 @@ def save_to_registry(deposits_data, total_amount):
         while ws.cell(row=current_row, column=4).value is not None:  # Столбец D
             current_row += 1
         
+        # Запоминаем первую строку для применения формата
+        first_row = current_row
+        
         today_date = datetime.now()
         
         # Записываем данные для каждого депозита
         for i, deposit in enumerate(deposits_data):
             # Столбец D (4) - Сумма
-            ws.cell(row=current_row, column=4, value=deposit['amount'])
+            ws.cell(row=current_row, column=4, value=float(deposit['amount']))
             
-            # Столбец E (5) - Ставка (в процентах, например 15.5)
-            rate_value = float(deposit['rate'].replace('%', '').replace(',', '.'))/100
+            # Столбец E (5) - Ставка
+            rate_str = deposit['rate'].replace('%', '').replace(',', '.')
+            rate_value = float(rate_str) / 100
             ws.cell(row=current_row, column=5, value=rate_value)
             
-            # Столбец H (8) - Размещение (сегодня в формате ДД.ММ.ГГГГ)
+            # Столбец H (8) - Размещение (сегодня)
             ws.cell(row=current_row, column=8, value=today_date)
             
-            # Столбец I (9) - Окончание (в формате ДД.ММ.ГГГГ)
-            # Преобразуем строку с датой в объект datetime
+            # Столбец I (9) - Окончание
+            # Преобразуем строку с датой
+            date_str = deposit['date'].strip()
+            
+            # Пробуем распарсить дату из формата ДД.ММ.ГГГГ
             try:
-                # Парсим дату из формата ДД.ММ.ГГГГ
-                end_date_str = deposit['date']
-                # Пробуем разные форматы
-                for fmt in ['%d.%m.%Y', '%d/%m/%Y', '%Y-%m-%d']:
-                    try:
-                        end_date = datetime.strptime(end_date_str, fmt)
-                        break
-                    except ValueError:
-                        continue
-                else:
-                    # Если ни один формат не подошел, используем строку как есть
-                    end_date = end_date_str
+                # Разбиваем строку на день, месяц, год
+                day, month, year = map(int, date_str.split('.'))
+                date_obj = datetime(year, month, day)
                 
-                ws.cell(row=current_row, column=9, value=end_date)
+                # Записываем как дату
+                ws.cell(row=current_row, column=9, value=date_obj)
+                # Устанавливаем формат ячейки как дата
+                ws.cell(row=current_row, column=9).number_format = 'DD.MM.YYYY'
+                
             except Exception as e:
-                # В случае ошибки записываем как строку
-                ws.cell(row=current_row, column=9, value=deposit['date'])
+                # Если не удалось распарсить, записываем как строку
+                print(f"Не удалось распарсить дату {date_str}: {e}")
+                ws.cell(row=current_row, column=9, value=date_str)
             
             current_row += 1
         
+        # Применяем формат даты ко всем записанным ячейкам
+        for row in range(first_row, current_row):
+            # Формат для столбца H (размещение)
+            cell_h = ws.cell(row=row, column=8)
+            cell_h.number_format = 'DD.MM.YYYY'
+            
+            # Формат для столбца I (окончание)
+            cell_i = ws.cell(row=row, column=9)
+            if isinstance(cell_i.value, datetime):
+                cell_i.number_format = 'DD.MM.YYYY'
+        
         # Сохраняем файл
         wb.save(REGISTRY_FILE_PATH)
+        
+        # Показываем сообщение об успехе
+        messagebox.showinfo("Успех", 
+                          f"Данные о депозитах успешно сохранены в реестр!\n"
+                          f"Записано депозитов: {len(deposits_data)}")
         return True
         
     except Exception as e:
         messagebox.showerror("Ошибка", f"Ошибка при сохранении в реестр: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return False
 
 def on_deposit_count_change(*args):
@@ -130,7 +152,7 @@ def on_deposit_count_change(*args):
         entry_date.pack(fill=tk.X, pady=(5, 10))
         
     else:
-        # Поля для нескольких депозитов (сумма, ставка и срок для каждого)
+        # Поля для нескольких депозитов
         count_num = int(count)
         tk.Label(deposit_fields_frame, text=f"Данные для {count_num} депозитов:", 
                  font=("Arial", 10, "bold")).pack(anchor=tk.W, pady=(0, 10))
@@ -209,7 +231,7 @@ def process_calculation():
         count = deposit_count.get()
         
         if count == "1":
-            # Обработка одного депозита (старая логика)
+            # Обработка одного депозита
             try:
                 payment_amount = parse_number(entry_payment.get())
                 interest_rate = entry_rate.get().strip()
@@ -333,7 +355,6 @@ def confirm_deposits():
     
     if result:
         if save_to_registry(root.deposits_data, root.total_amount):
-            messagebox.showinfo("Успех", "Данные о депозитах успешно сохранены в реестр!")
             # Деактивируем кнопку подтверждения
             btn_confirm.config(state=tk.DISABLED, bg="light gray")
         else:
@@ -368,7 +389,7 @@ deposit_combo = ttk.Combobox(frame_deposit_count,
 deposit_combo.pack(anchor=tk.W, pady=(5, 10))
 deposit_count.trace('w', on_deposit_count_change)
 
-# Фрейм для полей ввода (будет меняться в зависимости от выбора)
+# Фрейм для полей ввода
 deposit_fields_frame = tk.Frame(root)
 deposit_fields_frame.pack(pady=10, padx=20, fill=tk.X)
 
@@ -381,7 +402,7 @@ btn_process = tk.Button(root, text="Сформировать сообщение"
                        bg="#4CAF50", fg="white", font=("Arial", 12, "bold"))
 btn_process.pack(pady=10)
 
-# Кнопка подтверждения (изначально неактивна)
+# Кнопка подтверждения
 btn_confirm = tk.Button(root, text="Подтвердить размещение депозитов", 
                        command=confirm_deposits,
                        state=tk.DISABLED, bg="light gray", fg="black", font=("Arial", 12, "bold"))
@@ -392,7 +413,7 @@ tk.Label(root, text="Результат:").pack(anchor=tk.W, padx=20)
 result_text = tk.Text(root, height=12, width=65, font=("Arial", 10))
 result_text.pack(pady=10, padx=20, fill=tk.BOTH, expand=True)
 
-# Добавляем скроллбар для текстового поля
+# Добавляем скроллбар
 scrollbar = tk.Scrollbar(result_text)
 scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 result_text.config(yscrollcommand=scrollbar.set)
@@ -415,9 +436,4 @@ tk.Label(root, text=instruction, justify=tk.LEFT, fg="gray",
 
 # Запускаем приложение
 if __name__ == "__main__":
-    # Показываем предупреждение о необходимости настройки пути
-    if REGISTRY_FILE_PATH == r"C:\путь\к\вашему\файлу\Реестр депозитов.xlsx":
-        messagebox.showwarning("Настройка", 
-                              "Перед использованием замените REGISTRY_FILE_PATH в коде на актуальный путь к вашему файлу!")
-    
     root.mainloop()
