@@ -1,54 +1,68 @@
 import win32com.client
 import pythoncom
 import os
-from datetime import datetime
 
 # Конфигурация
-FLAG_FILE = r"C:\temp\outlook_sent.flag"
+STOP_FILE = r"D:\мои_письма\stop.txt"  # Путь к файлу-флагу
+TARGET_FOLDER = "Мои готовые письма"    # Имя папки в Outlook
 
-def send_drafts():
-    """Отправляет черновики если нет флага"""
+def send_from_specific_folder():
+    """Отправляет письма из конкретной папки Outlook"""
     
-    # Если есть флаг - выходим
-    if os.path.exists(FLAG_FILE):
-        print(f"[{datetime.now()}] Флаг найден, пропускаем отправку")
+    # Проверяем stop файл
+    if os.path.exists(STOP_FILE):
+        print(f"Найден {STOP_FILE}, отправка пропущена")
         return
     
-    print(f"[{datetime.now()}] Начинаем отправку...")
+    print(f"Поиск папки '{TARGET_FOLDER}'...")
     
     try:
         pythoncom.CoInitialize()
         outlook = win32com.client.Dispatch("Outlook.Application")
         namespace = outlook.GetNamespace("MAPI")
         
-        drafts = namespace.GetDefaultFolder(16)
+        # Ищем нужную папку
+        target_folder = None
         
-        sent = 0
-        errors = 0
+        # Поиск во всех почтовых ящиках
+        for store in namespace.Folders:
+            for folder in store.Folders:
+                if folder.Name == TARGET_FOLDER:
+                    target_folder = folder
+                    break
+            if target_folder:
+                break
         
-        for item in drafts.Items:
+        if not target_folder:
+            print(f"Папка '{TARGET_FOLDER}' не найдена")
+            return
+        
+        print(f"Папка найдена, начинаем отправку...")
+        
+        sent_count = 0
+        
+        # Отправляем все письма из папки
+        for item in target_folder.Items:
             if item.Class == 43:  # Письмо
                 try:
                     item.Send()
-                    sent += 1
-                    print(f"  Отправлено: {item.Subject}")
+                    sent_count += 1
+                    print(f"✓ {sent_count}. {item.Subject}")
                 except Exception as e:
-                    errors += 1
-                    print(f"  Ошибка: {e}")
+                    print(f"✗ Ошибка: {e}")
         
-        print(f"Итого: отправлено {sent}, ошибок {errors}")
+        print(f"\nОтправлено писем: {sent_count}")
         
-        # Создаем флаг
-        with open(FLAG_FILE, 'w') as f:
-            f.write(f"Sent: {sent}, Errors: {errors}\n")
-            f.write(f"Date: {datetime.now()}")
+        # Создаем stop.txt
+        with open(STOP_FILE, 'w') as f:
+            f.write(f"OK\n{sent_count}")
         
-        print(f"Флаг создан: {FLAG_FILE}")
+        print(f"Создан {STOP_FILE}")
         
     except Exception as e:
-        print(f"Критическая ошибка: {e}")
+        print(f"Ошибка: {e}")
     finally:
         pythoncom.CoUninitialize()
 
 if __name__ == "__main__":
-    send_drafts()
+    send_from_specific_folder()
