@@ -150,3 +150,21 @@ def deep_ftp_diagnostics():
 
 # Запускаем глубокую диагностику
 deep_ftp_diagnostics()
+
+// Задать параметры соединения
+SessionOptions sessionOptions = new SessionOptions
+{
+    Protocol = Protocol.Ftp,
+    HostName = "ftp.renlife.com",
+    UserName = "Ilya.Matveev2@mos.renlife.com",
+    Password = "ssssss",
+};
+
+using (Session session = new Session())
+{
+    // Подключиться
+    session.Open(sessionOptions);
+
+    // Передать файлы
+    session.GetFiles("/diadoc_connector", @"\\fs-01.renlife.com\alldocs\Инвестиционный департамент\7.0 Treasury\*").Check();
+}
