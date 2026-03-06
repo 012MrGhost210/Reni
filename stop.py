@@ -18,8 +18,9 @@ def remove_stop_file():
 
 if __name__ == "__main__":
     remove_stop_file()
-Поиск .msg файлов в \\fs-01.renlife.com\alldocs\Инвестиционный департамент\7.0 Treasury\Test\Автопочта...
-Ошибка: (-2147221005, 'Недопустимая строка с указанием класса', None, None)
+import requests
+response = requests.get('http://<IP-вашего-локального-ПК>:5000/run')
+print(response.json())
 
 
 
