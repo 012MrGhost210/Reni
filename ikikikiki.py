@@ -1,128 +1,132 @@
 import ftplib
 import os
-import chardet
 
-def check_ftp_encoding_and_folders():
+def download_all_files_bruteforce():
+    """Скачивает все файлы из всех папок, используя сырые имена"""
+    
     print("=" * 60)
-    print("ДИАГНОСТИКА FTP СЕРВЕРА")
+    print("УНИВЕРСАЛЬНЫЙ СКРИПТ СКАЧИВАНИЯ")
     print("=" * 60)
     
     ftp_server = "ftp.renlife.com"
     ftp_user = "Ilya.Matveev2@mos.renlife.com"
     ftp_pass = "ыыыыыыы"
     ftp_folder = "/diadoc_connector"
+    save_folder = r"M:\Инвестиционный департамент\7.0 Treasury\Diadoc"
     
     try:
         # Подключаемся
         ftp = ftplib.FTP(ftp_server)
         ftp.login(ftp_user, ftp_pass)
+        ftp.encoding = 'latin-1'  # Самая безопасная кодировка
         
-        print(f"\nПодключено к {ftp_server}")
-        
-        # Переходим в папку
+        # Переходим в нужную папку
         ftp.cwd(ftp_folder)
-        print(f"В папке: {ftp_folder}")
+        print(f"\n✓ В папке: {ftp_folder}")
         
-        # Пробуем разные кодировки
-        encodings = ['cp1251', 'utf-8', 'koi8-r', 'cp866', 'latin-1']
+        # Получаем список всего
+        items = ftp.nlst()
+        print(f"✓ Найдено элементов: {len(items)}")
         
-        print("\nПробуем разные кодировки для получения списка папок:")
-        print("-" * 50)
+        # Создаем папку для сохранения
+        os.makedirs(save_folder, exist_ok=True)
         
-        for encoding in encodings:
+        total_files = 0
+        processed_folders = 0
+        
+        print("\n" + "=" * 50)
+        print("НАЧИНАЮ СКАЧИВАНИЕ")
+        print("=" * 50)
+        
+        # Обрабатываем каждый элемент
+        for item in items:
+            if item in ['.', '..']:
+                continue
+            
             try:
-                ftp.encoding = encoding
-                print(f"\nКодировка: {encoding}")
+                # Пробуем зайти как в папку
+                ftp.cwd(item)
+                print(f"\n📁 Найдена папка: {item}")
                 
-                # Получаем список
-                items = ftp.nlst()
-                print(f"Получено элементов: {len(items)}")
+                # Получаем файлы в папке
+                try:
+                    folder_files = ftp.nlst()
+                    print(f"  Содержит {len(folder_files)} элементов")
+                    
+                    # Скачиваем каждый файл из папки
+                    for filename in folder_files:
+                        if filename in ['.', '..']:
+                            continue
+                        
+                        try:
+                            # Проверяем размер (если это файл)
+                            size = ftp.size(filename)
+                            
+                            # Формируем имя для сохранения
+                            safe_name = f"[{item}]_{filename}"
+                            # Заменяем недопустимые символы
+                            safe_name = safe_name.replace('/', '_').replace('\\', '_')
+                            local_path = os.path.join(save_folder, safe_name)
+                            
+                            print(f"    📄 Скачиваю: {filename} ({size/1024:.1f} KB)")
+                            
+                            # Скачиваем
+                            with open(local_path, 'wb') as f:
+                                ftp.retrbinary(f'RETR {filename}', f.write)
+                            
+                            print(f"      ✓ Сохранен как: {safe_name}")
+                            total_files += 1
+                            
+                        except:
+                            # Это папка внутри папки - игнорируем
+                            pass
+                    
+                    processed_folders += 1
+                    
+                except Exception as e:
+                    print(f"  Не удалось получить список файлов: {e}")
                 
-                # Показываем русские названия (если есть)
-                for item in items[:10]:  # Первые 10
-                    # Проверяем, похоже ли на русский
-                    if any(ord(c) > 127 for c in item):
-                        print(f"  {item}")
+                # Возвращаемся назад
+                ftp.cwd('..')
                 
-                # Если нашли русские названия
-                if any(any(ord(c) > 127 for c in item) for item in items):
-                    print(f"✓ В кодировке {encoding} видны русские буквы!")
-                    
-                    # Показываем все папки
-                    print("\nПапки на сервере:")
-                    for item in items:
-                        if item not in ['.', '..']:
-                            try:
-                                ftp.cwd(item)
-                                print(f"  📁 {item} (папка)")
-                                ftp.cwd('..')
-                            except:
-                                print(f"  📄 {item} (файл)")
-                    
-                    # Запоминаем рабочую кодировку
-                    working_encoding = encoding
-                    break
-                    
             except Exception as e:
-                print(f"Ошибка с {encoding}: {e}")
+                # Это файл, а не папка
+                try:
+                    size = ftp.size(item)
+                    print(f"\n📄 Найден файл: {item} ({size/1024:.1f} KB)")
+                    
+                    # Сохраняем файл в корень
+                    local_path = os.path.join(save_folder, item)
+                    
+                    with open(local_path, 'wb') as f:
+                        ftp.retrbinary(f'RETR {item}', f.write)
+                    
+                    print(f"  ✓ Сохранен")
+                    total_files += 1
+                    
+                except:
+                    print(f"\n⚠️ Не удалось обработать: {item}")
         
-        if 'working_encoding' in locals():
-            print(f"\n✅ РАБОЧАЯ КОДИРОВКА: {working_encoding}")
-            
-            # Проверяем наличие наших папок
-            print("\nПроверяем наличие целевых папок:")
-            target_folders = [
-                "Аннулирован",
-                "Документооборот завершён",
-                "Подписан",
-                "Требуется аннулирование", 
-                "Требуется подпись"
-            ]
-            
-            items = ftp.nlst()
-            items_lower = [item.lower() for item in items]
-            
-            for target in target_folders:
-                found = False
-                for item in items:
-                    # Сравниваем без учета регистра
-                    if target.lower() in item.lower() or item.lower() in target.lower():
-                        print(f"  {target} -> найдено как: {item}")
-                        found = True
-                        break
-                if not found:
-                    print(f"  {target} -> НЕ НАЙДЕНО!")
-        else:
-            print("\n❌ Не удалось найти рабочую кодировку")
+        print("\n" + "=" * 50)
+        print(f"✅ ГОТОВО!")
+        print(f"   Обработано папок: {processed_folders}")
+        print(f"   Скачано файлов: {total_files}")
+        print(f"   Сохранено в: {save_folder}")
+        
+        # Показываем результат
+        if os.path.exists(save_folder):
+            files = os.listdir(save_folder)
+            print(f"\nЛокальная папка содержит {len(files)} файлов:")
+            for f in sorted(files)[:20]:
+                print(f"  {f}")
         
         ftp.quit()
         
     except Exception as e:
-        print(f"Ошибка: {e}")
+        print(f"\n❌ Ошибка: {e}")
     
     input("\nНажмите Enter для выхода...")
-    Подключено к ftp.renlife.com
-В папке: /diadoc_connector
 
-Пробуем разные кодировки для получения списка папок:
---------------------------------------------------
-
-Кодировка: cp1251
-Получено элементов: 5
-
-Кодировка: utf-8
-Получено элементов: 5
-
-Кодировка: koi8-r
-Получено элементов: 5
-
-Кодировка: cp866
-Получено элементов: 5
-
-Кодировка: latin-1
-Получено элементов: 5
-
-❌ Не удалось найти рабочую кодировку
-
-# Запускаем диагностику
-check_ftp_encoding_and_folders()
+# Запускаем
+if __name__ == "__main__":
+    download_all_files_bruteforce()
