@@ -1,124 +1,145 @@
 import ftplib
 import os
 
-def download_all_files_bruteforce():
-    """Скачивает все файлы из всех папок, используя сырые имена"""
-    
+def deep_ftp_diagnostics():
     print("=" * 60)
-    print("УНИВЕРСАЛЬНЫЙ СКРИПТ СКАЧИВАНИЯ")
+    print("ГЛУБОКАЯ ДИАГНОСТИКА FTP СЕРВЕРА")
     print("=" * 60)
     
     ftp_server = "ftp.renlife.com"
     ftp_user = "Ilya.Matveev2@mos.renlife.com"
     ftp_pass = "ыыыыыыы"
     ftp_folder = "/diadoc_connector"
-    save_folder = r"M:\Инвестиционный департамент\7.0 Treasury\Diadoc"
     
     try:
         # Подключаемся
         ftp = ftplib.FTP(ftp_server)
         ftp.login(ftp_user, ftp_pass)
-        ftp.encoding = 'latin-1'  # Самая безопасная кодировка
         
-        # Переходим в нужную папку
+        print(f"\n✓ Подключено к {ftp_server}")
+        print(f"✓ Пользователь: {ftp_user}")
+        
+        # Переходим в папку
         ftp.cwd(ftp_folder)
-        print(f"\n✓ В папке: {ftp_folder}")
+        print(f"✓ В папке: {ftp_folder}")
         
-        # Получаем список всего
-        items = ftp.nlst()
-        print(f"✓ Найдено элементов: {len(items)}")
+        # Получаем детальную информацию разными методами
+        print("\n" + "=" * 40)
+        print("МЕТОД 1: LIST (подробный список)")
+        print("=" * 40)
         
-        # Создаем папку для сохранения
-        os.makedirs(save_folder, exist_ok=True)
+        # Используем LIST для получения детальной информации
+        files_list = []
+        ftp.dir(files_list.append)
         
-        total_files = 0
-        processed_folders = 0
-        
-        print("\n" + "=" * 50)
-        print("НАЧИНАЮ СКАЧИВАНИЕ")
-        print("=" * 50)
-        
-        # Обрабатываем каждый элемент
-        for item in items:
-            if item in ['.', '..']:
-                continue
+        print(f"Найдено элементов: {len(files_list)}")
+        for i, item in enumerate(files_list, 1):
+            print(f"{i:2}. {item}")
             
-            try:
-                # Пробуем зайти как в папку
-                ftp.cwd(item)
-                print(f"\n📁 Найдена папка: {item}")
+            # Пробуем разобрать строку
+            parts = item.split()
+            if len(parts) >= 9:
+                filename = ' '.join(parts[8:])
+                print(f"   Имя файла: {filename}")
+                print(f"   Права: {parts[0]}")
+                print(f"   Размер: {parts[4]} байт")
+        
+        print("\n" + "=" * 40)
+        print("МЕТОД 2: NLST (простой список)")
+        print("=" * 40)
+        
+        # Используем NLST для получения простого списка
+        try:
+            nlst_items = ftp.nlst()
+            print(f"Найдено элементов: {len(nlst_items)}")
+            for i, item in enumerate(nlst_items, 1):
+                print(f"{i:2}. {item}")
                 
-                # Получаем файлы в папке
+                # Пытаемся определить тип (файл или папка)
                 try:
-                    folder_files = ftp.nlst()
-                    print(f"  Содержит {len(folder_files)} элементов")
-                    
-                    # Скачиваем каждый файл из папки
-                    for filename in folder_files:
-                        if filename in ['.', '..']:
-                            continue
-                        
-                        try:
-                            # Проверяем размер (если это файл)
-                            size = ftp.size(filename)
-                            
-                            # Формируем имя для сохранения
-                            safe_name = f"[{item}]_{filename}"
-                            # Заменяем недопустимые символы
-                            safe_name = safe_name.replace('/', '_').replace('\\', '_')
-                            local_path = os.path.join(save_folder, safe_name)
-                            
-                            print(f"    📄 Скачиваю: {filename} ({size/1024:.1f} KB)")
-                            
-                            # Скачиваем
-                            with open(local_path, 'wb') as f:
-                                ftp.retrbinary(f'RETR {filename}', f.write)
-                            
-                            print(f"      ✓ Сохранен как: {safe_name}")
-                            total_files += 1
-                            
-                        except:
-                            # Это папка внутри папки - игнорируем
-                            pass
-                    
-                    processed_folders += 1
-                    
-                except Exception as e:
-                    print(f"  Не удалось получить список файлов: {e}")
-                
-                # Возвращаемся назад
-                ftp.cwd('..')
-                
-            except Exception as e:
-                # Это файл, а не папка
-                try:
-                    size = ftp.size(item)
-                    print(f"\n📄 Найден файл: {item} ({size/1024:.1f} KB)")
-                    
-                    # Сохраняем файл в корень
-                    local_path = os.path.join(save_folder, item)
-                    
-                    with open(local_path, 'wb') as f:
-                        ftp.retrbinary(f'RETR {item}', f.write)
-                    
-                    print(f"  ✓ Сохранен")
-                    total_files += 1
-                    
+                    ftp.cwd(item)
+                    print(f"   → ЭТО ПАПКА")
+                    ftp.cwd('..')
                 except:
-                    print(f"\n⚠️ Не удалось обработать: {item}")
+                    try:
+                        size = ftp.size(item)
+                        print(f"   → ЭТО ФАЙЛ, размер: {size} байт")
+                    except:
+                        print(f"   → НЕИЗВЕСТНЫЙ ТИП")
+        except Exception as e:
+            print(f"Ошибка NLST: {e}")
         
-        print("\n" + "=" * 50)
-        print(f"✅ ГОТОВО!")
-        print(f"   Обработано папок: {processed_folders}")
-        print(f"   Скачано файлов: {total_files}")
-        print(f"   Сохранено в: {save_folder}")
+        print("\n" + "=" * 40)
+        print("МЕТОД 3: MLSD (стандартный листинг)")
+        print("=" * 40)
         
-        # Показываем результат
-        if os.path.exists(save_folder):
-            files = os.listdir(save_folder)
-            print(f"\nЛокальная папка содержит {len(files)} файлов:")
-            for f in sorted(files)[:20]:
-                print(f"  {f}")
+        # Пробуем MLSD (более современный метод)
+        try:
+            mlsd_items = list(ftp.mlsd())
+            print(f"Найдено элементов: {len(mlsd_items)}")
+            for name, facts in mlsd_items:
+                print(f"  Имя: {name}")
+                print(f"  Тип: {facts.get('type', 'unknown')}")
+                print(f"  Размер: {facts.get('size', 'unknown')}")
+                print(f"  Модификация: {facts.get('modify', 'unknown')}")
+                print("  ---")
+        except Exception as e:
+            print(f"MLSD не поддерживается: {e}")
+        
+        print("\n" + "=" * 40)
+        print("МЕТОД 4: ПРОВЕРКА РАЗНЫХ КОДИРОВОК ДЛЯ LIST")
+        print("=" * 40)
+        
+        encodings = ['cp1251', 'utf-8', 'koi8-r', 'cp866', 'latin-1', 'cp1252', 'mac-cyrillic']
+        
+        for encoding in encodings:
+            try:
+                ftp.encoding = encoding
+                print(f"\nКодировка: {encoding}")
+                
+                # Получаем LIST с этой кодировкой
+                list_data = []
+                ftp.dir(list_data.append)
+                
+                for item in list_data:
+                    # Показываем байтовое представление для анализа
+                    print(f"  {item}")
+                    
+                    # Показываем hex значения для первых символов
+                    if item:
+                        bytes_item = item.encode('latin-1', errors='ignore')
+                        hex_str = ' '.join([f'{b:02x}' for b in bytes_item[:20]])
+                        print(f"  HEX: {hex_str}")
+                        
+            except Exception as e:
+                print(f"  Ошибка: {e}")
+        
+        # Проверяем содержимое папок
+        print("\n" + "=" * 40)
+        print("ПРОВЕРКА СОДЕРЖИМОГО ПАПОК")
+        print("=" * 40)
+        
+        # Получаем список элементов
+        items = ftp.nlst()
+        
+        for item in items:
+            if item not in ['.', '..']:
+                try:
+                    # Пробуем зайти в папку
+                    ftp.cwd(item)
+                    print(f"\n📁 Папка: {item}")
+                    
+                    # Смотрим что внутри
+                    subitems = ftp.nlst()
+                    print(f"  Содержит {len(subitems)} элементов")
+                    
+                    # Показываем первые 5
+                    for subitem in subitems[:5]:
+                        print(f"    - {subitem}")
+                    
+                    ftp.cwd('..')
+                except:
+                    print(f"\n📄 Файл: {item}")
         
         ftp.quit()
         
@@ -127,6 +148,5 @@ def download_all_files_bruteforce():
     
     input("\nНажмите Enter для выхода...")
 
-# Запускаем
-if __name__ == "__main__":
-    download_all_files_bruteforce()
+# Запускаем глубокую диагностику
+deep_ftp_diagnostics()
