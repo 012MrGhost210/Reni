@@ -6,7 +6,7 @@ def download_with_structure():
     
     ftp_server = "ftp.renlife.com"
     ftp_user = "Ilya.Matveev2@mos.renlife.com"
-    ftp_pass = "ыыыыыыы"
+    ftp_pass = "@$CiaG3008"
     ftp_folder = "/diadoc_connector"
     save_folder = r"M:\Инвестиционный департамент\7.0 Treasury\Diadoc"
     
@@ -54,3 +54,18 @@ def download_with_structure():
 # Запуск
 download_with_structure()
 input("Нажмите Enter...")
+
+Обрабатываю: Аннулирован
+  Ошибка с папкой Аннулирован: 550 Folder Àííóëèðîâàí not found
+
+Обрабатываю: Документооборот завершён
+  Ошибка с папкой Документооборот завершён: 550 Folder Äîêóìåíòîîáîðîò çàâåðø¸í not found
+
+Обрабатываю: Подписан
+  Ошибка с папкой Подписан: 550 Folder Ïîäïèñàí not found
+
+Обрабатываю: Требуется аннулирование
+  Ошибка с папкой Требуется аннулирование: 550 Folder Òðåáóåòñÿ àííóëèðîâàíèå not found
+
+Обрабатываю: Требуется подпись
+  Ошибка с папкой Требуется подпись: 550 Folder Òðåáóåòñÿ ïîäïèñü not found
