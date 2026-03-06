@@ -1,71 +1,106 @@
 import ftplib
 import os
+import chardet
 
-def download_with_structure():
-    """Сохраняет файлы с сохранением структуры папок"""
+def check_ftp_encoding_and_folders():
+    print("=" * 60)
+    print("ДИАГНОСТИКА FTP СЕРВЕРА")
+    print("=" * 60)
     
     ftp_server = "ftp.renlife.com"
     ftp_user = "Ilya.Matveev2@mos.renlife.com"
-    ftp_pass = "@$CiaG3008"
+    ftp_pass = "ыыыыыыы"
     ftp_folder = "/diadoc_connector"
-    save_folder = r"M:\Инвестиционный департамент\7.0 Treasury\Diadoc"
     
-    target_folders = [
-        "Аннулирован",
-        "Документооборот завершён", 
-        "Подписан",
-        "Требуется аннулирование",
-        "Требуется подпись"
-    ]
-    
-    ftp = ftplib.FTP(ftp_server)
-    ftp.login(ftp_user, ftp_pass)
-    ftp.encoding = 'cp1251'
-    ftp.cwd(ftp_folder)
-    
-    for folder in target_folders:
-        try:
-            print(f"\nОбрабатываю: {folder}")
-            ftp.cwd(folder)
-            
-            # Создаем локальную папку с таким же именем
-            local_folder = os.path.join(save_folder, folder)
-            os.makedirs(local_folder, exist_ok=True)
-            
-            # Получаем файлы
-            files = ftp.nlst()
-            
-            for file in files:
-                if file not in ['.', '..']:
-                    print(f"  Скачиваю: {file}")
-                    local_path = os.path.join(local_folder, file)
+    try:
+        # Подключаемся
+        ftp = ftplib.FTP(ftp_server)
+        ftp.login(ftp_user, ftp_pass)
+        
+        print(f"\nПодключено к {ftp_server}")
+        
+        # Переходим в папку
+        ftp.cwd(ftp_folder)
+        print(f"В папке: {ftp_folder}")
+        
+        # Пробуем разные кодировки
+        encodings = ['cp1251', 'utf-8', 'koi8-r', 'cp866', 'latin-1']
+        
+        print("\nПробуем разные кодировки для получения списка папок:")
+        print("-" * 50)
+        
+        for encoding in encodings:
+            try:
+                ftp.encoding = encoding
+                print(f"\nКодировка: {encoding}")
+                
+                # Получаем список
+                items = ftp.nlst()
+                print(f"Получено элементов: {len(items)}")
+                
+                # Показываем русские названия (если есть)
+                for item in items[:10]:  # Первые 10
+                    # Проверяем, похоже ли на русский
+                    if any(ord(c) > 127 for c in item):
+                        print(f"  {item}")
+                
+                # Если нашли русские названия
+                if any(any(ord(c) > 127 for c in item) for item in items):
+                    print(f"✓ В кодировке {encoding} видны русские буквы!")
                     
-                    with open(local_path, 'wb') as f:
-                        ftp.retrbinary(f'RETR {file}', f.write)
+                    # Показываем все папки
+                    print("\nПапки на сервере:")
+                    for item in items:
+                        if item not in ['.', '..']:
+                            try:
+                                ftp.cwd(item)
+                                print(f"  📁 {item} (папка)")
+                                ftp.cwd('..')
+                            except:
+                                print(f"  📄 {item} (файл)")
+                    
+                    # Запоминаем рабочую кодировку
+                    working_encoding = encoding
+                    break
+                    
+            except Exception as e:
+                print(f"Ошибка с {encoding}: {e}")
+        
+        if 'working_encoding' in locals():
+            print(f"\n✅ РАБОЧАЯ КОДИРОВКА: {working_encoding}")
             
-            ftp.cwd('..')
+            # Проверяем наличие наших папок
+            print("\nПроверяем наличие целевых папок:")
+            target_folders = [
+                "Аннулирован",
+                "Документооборот завершён",
+                "Подписан",
+                "Требуется аннулирование", 
+                "Требуется подпись"
+            ]
             
-        except Exception as e:
-            print(f"  Ошибка с папкой {folder}: {e}")
+            items = ftp.nlst()
+            items_lower = [item.lower() for item in items]
+            
+            for target in target_folders:
+                found = False
+                for item in items:
+                    # Сравниваем без учета регистра
+                    if target.lower() in item.lower() or item.lower() in target.lower():
+                        print(f"  {target} -> найдено как: {item}")
+                        found = True
+                        break
+                if not found:
+                    print(f"  {target} -> НЕ НАЙДЕНО!")
+        else:
+            print("\n❌ Не удалось найти рабочую кодировку")
+        
+        ftp.quit()
+        
+    except Exception as e:
+        print(f"Ошибка: {e}")
     
-    ftp.quit()
-    print(f"\nГотово! Файлы сохранены в {save_folder}")
+    input("\nНажмите Enter для выхода...")
 
-# Запуск
-download_with_structure()
-input("Нажмите Enter...")
-
-Обрабатываю: Аннулирован
-  Ошибка с папкой Аннулирован: 550 Folder Àííóëèðîâàí not found
-
-Обрабатываю: Документооборот завершён
-  Ошибка с папкой Документооборот завершён: 550 Folder Äîêóìåíòîîáîðîò çàâåðø¸í not found
-
-Обрабатываю: Подписан
-  Ошибка с папкой Подписан: 550 Folder Ïîäïèñàí not found
-
-Обрабатываю: Требуется аннулирование
-  Ошибка с папкой Требуется аннулирование: 550 Folder Òðåáóåòñÿ àííóëèðîâàíèå not found
-
-Обрабатываю: Требуется подпись
-  Ошибка с папкой Требуется подпись: 550 Folder Òðåáóåòñÿ ïîäïèñü not found
+# Запускаем диагностику
+check_ftp_encoding_and_folders()
