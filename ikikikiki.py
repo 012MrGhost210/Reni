@@ -1,43 +1,53 @@
 import ftplib
 import os
 
-def simple_ftp_download_all():
-    """Простое скачивание всех файлов (без вложенных папок)"""
+def simple_copy():
+    """Максимально простое копирование всех файлов"""
     
-    ftp_server = "ftp.renlife.com"
-    ftp_user = "Ilya.Matveev2@mos.renlife.com" 
-    ftp_pass = "ыыыыыыы"
-    ftp_folder = "/diadoc_connector"
-    save_folder = r"M:\Инвестиционный департамент\7.0 Treasury\Diadoc"
+    # Настройки
+    server = "ftp.renlife.com"
+    user = "Ilya.Matveev2@mos.renlife.com"
+    password = "ыыыыыыы"
+    remote_dir = "/diadoc_connector"
+    local_dir = r"M:\Инвестиционный департамент\7.0 Treasury\Diadoc"
     
-    # Подключаемся
-    ftp = ftplib.FTP(ftp_server)
-    ftp.login(ftp_user, ftp_pass)
-    ftp.encoding = 'utf-8'
-    ftp.cwd(ftp_folder)
+    print(f"Копирую файлы из {remote_dir}...")
     
-    # Создаем папку
-    os.makedirs(save_folder, exist_ok=True)
+    # Подключение
+    ftp = ftplib.FTP(server)
+    ftp.login(user, password)
+    ftp.encoding = 'cp1251'  # Для русских букв
+    ftp.cwd(remote_dir)
     
-    # Получаем список файлов
-    files = ftp.nlst()  # Получаем простой список имен
+    # Создаем локальную папку
+    os.makedirs(local_dir, exist_ok=True)
     
-    print(f"Найдено файлов: {len(files)}")
+    # Получаем все файлы (простой список)
+    files = ftp.nlst()
     
-    # Скачиваем каждый файл
-    for i, filename in enumerate(files, 1):
-        if filename not in ['.', '..']:
-            print(f"[{i}/{len(files)}] Скачиваю: {filename}")
-            local_path = os.path.join(save_folder, filename)
+    print(f"Найдено элементов: {len(files)}")
+    
+    # Копируем все подряд
+    count = 0
+    for item in files:
+        if item in ['.', '..']:
+            continue
             
-            try:
-                with open(local_path, 'wb') as f:
-                    ftp.retrbinary(f'RETR {filename}', f.write)
-                print(f"  ✓ OK")
-            except Exception as e:
-                print(f"  ✗ Ошибка: {e}")
+        print(f"Копирую: {item}")
+        local_path = os.path.join(local_dir, item)
+        
+        try:
+            with open(local_path, 'wb') as f:
+                ftp.retrbinary(f'RETR {item}', f.write)
+            print(f"  ✓ OK")
+            count += 1
+        except:
+            print(f"  → Пропускаю (возможно папка)")
     
     ftp.quit()
-    print(f"\nГотово! Файлы в: {save_folder}")
+    print(f"\nСкопировано файлов: {count}")
+    print(f"В папку: {local_dir}")
 
-simple_ftp_download_all()
+if __name__ == "__main__":
+    simple_copy()
+    input("\nНажмите Enter...")
