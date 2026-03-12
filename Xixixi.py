@@ -144,3 +144,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+invalid literal for int() with base 10: ''
