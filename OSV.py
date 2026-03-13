@@ -13,7 +13,9 @@ os.makedirs(os.path.dirname(output_path), exist_ok=True)
 print(f"📂 Читаем файл: {input_path}")
 print(f"📁 Сохраняем в: {output_path}")
 
-# Читаем файл Excel
+# Читаем файл Excel, пропускаем первые колонки (A, B, C - они пустые)
+# Нам нужны колонки D (дебет) и E (кредит) - это индексы 3 и 4
+# Но нам также нужна колонка A для анализа структуры
 df = pd.read_excel(input_path, sheet_name='Лист_1', header=None)
 print(f"✅ Файл загружен, строк: {len(df)}")
 
@@ -40,27 +42,21 @@ def is_article(text):
     skip_words = ['Обороты за', 'Итого', 'Всего', 'Банковские счета', 
                   'Статьи движения', 'Сальдо', 'Выводимые данные']
     
-    # Если есть эти слова - это не статья
     if any(skip in text for skip in skip_words):
         return False
     
-    # Если строка начинается с цифр - это не статья (счет или дата)
     if text[0].isdigit():
         return False
     
-    # Если это подразделение - не статья
     if 'Основное подразделение' in text:
         return False
     
-    # Если это банковский счет (есть запятая и много цифр) - не статья
     if ',' in text and sum(c.isdigit() for c in text) > 10:
         return False
     
-    # Если это просто "Обороты за..." - не статья
     if text.startswith('Обороты за'):
         return False
     
-    # Всё остальное - скорее всего статья ДДС
     return True
 
 while row_idx < total_rows:
@@ -76,26 +72,23 @@ while row_idx < total_rows:
     if 'Основное подразделение' in first_col:
         current_data['подразделение'] = first_col
         current_data['банковский_счет'] = None
-        current_data['статья_ддс'] = None  # Сбрасываем статью при новом подразделении
+        current_data['статья_ддс'] = None
         print(f"\n📍 Найдено подразделение [{row_idx}]: {first_col}")
         
-        # Смотрим следующую строку - там должен быть банковский счет
         if row_idx + 1 < total_rows:
             next_row = df.iloc[row_idx + 1]
             next_first = str(next_row[0]) if pd.notna(next_row[0]) else ""
             
-            # Проверяем, что следующая строка содержит банковский счет
             if next_first and any(c.isdigit() for c in next_first) and ',' in next_first:
                 current_data['банковский_счет'] = next_first
                 print(f"🏦 Найден банковский счет [{row_idx + 1}]: {next_first[:70]}...")
-                row_idx += 1  # Пропускаем строку с банк. счетом
+                row_idx += 1
         
         row_idx += 1
         continue
     
-    # ПОИСК СТАТЕЙ ДДС - теперь это основное!
+    # ПОИСК СТАТЕЙ ДДС
     if is_article(first_col):
-        # Это новая статья ДДС
         current_data['статья_ддс'] = first_col
         print(f"📝 Найдена статья [{row_idx}]: {first_col}")
         row_idx += 1
@@ -105,17 +98,23 @@ while row_idx < total_rows:
     if 'Обороты за' in first_col:
         date_match = re.search(r'(\d{2}\.\d{2}\.\d{2})', first_col)
         if date_match:
-            date_str = date_match.group(1)
+            date_str = date_match.group(1)  # Например: "13.02.26"
             
-            # Преобразуем дату
+            # ПРЕОБРАЗУЕМ В ФОРМАТ ДД.ММ.ГГГГ (с 20 в начале года)
             try:
-                excel_date = datetime.strptime(date_str, '%d.%m.%y')
-                display_date = date_str
+                # Преобразуем "13.02.26" в "13.02.2026"
+                day, month, year = date_str.split('.')
+                full_year = f"20{year}"  # 26 -> 2026
+                date_with_year = f"{day}.{month}.{full_year}"
+                
+                # Создаем объект datetime для Excel
+                excel_date = datetime.strptime(date_with_year, '%d.%m.%Y')
+                display_date = date_with_year
             except:
                 excel_date = None
                 display_date = date_str
             
-            # Получаем дебет и кредит
+            # Получаем дебет и кредит из колонок D и E (индексы 3 и 4)
             debit = row[3] if pd.notna(row[3]) else 0
             credit = row[4] if pd.notna(row[4]) else 0
             
@@ -129,16 +128,12 @@ while row_idx < total_rows:
             
             # Добавляем запись, если есть движение
             if debit != 0 or credit != 0:
-                # Проверяем, что у нас есть статья ДДС
-                if current_data.get('статья_ддс') is None:
-                    print(f"⚠️ ВНИМАНИЕ: Найдены обороты без статьи ДДС! Строка {row_idx}: {first_col}")
-                
                 result_rows.append({
                     'Счет': current_data['счет'],
                     'Подразделение': current_data.get('подразделение', ''),
                     'Банковский_счет': current_data.get('банковский_счет', ''),
                     'Статья_ДДС': current_data.get('статья_ддс', ''),
-                    'Дата': excel_date,
+                    'Дата': excel_date,  # Сохраняем как datetime для Excel
                     'Дебет': debit,
                     'Кредит': credit
                 })
@@ -162,40 +157,50 @@ if result_rows:
     for col in text_columns:
         result_df[col] = result_df[col].fillna('')
     
-    # Проверяем, есть ли пустые статьи
-    empty_articles = result_df[result_df['Статья_ДДС'] == '']
-    if len(empty_articles) > 0:
-        print(f"\n⚠️ Найдено {len(empty_articles)} строк с пустыми статьями ДДС!")
-        print("Примеры:")
-        print(empty_articles[['Дата', 'Дебет', 'Кредит']].head())
-    
     # Убираем дубликаты
     result_df = result_df.drop_duplicates()
     
     # Сортируем по дате
     result_df = result_df.sort_values('Дата')
     
-    # Переупорядочиваем колонки
+    # Переупорядочиваем колонки - теперь у нас только нужные колонки (без A,B,C)
     columns = ['Счет', 'Подразделение', 'Банковский_счет', 'Статья_ДДС', 'Дата', 'Дебет', 'Кредит']
     result_df = result_df[columns]
     
-    # Сохраняем с форматированием
-    with pd.ExcelWriter(output_path, engine='openpyxl', datetime_format='dd.mm.yy') as writer:
-        result_df.to_excel(writer, sheet_name='ОСВ_плоская', index=False)
+    # Сохраняем с правильным форматированием
+    with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+        # Преобразуем даты в формат с полным годом для отображения
+        result_df.to_excel(writer, sheet_name='ОСВ_плоская', index=False, startcol=0)
+        
+        # Получаем лист для форматирования
+        worksheet = writer.sheets['ОСВ_плоская']
+        
+        # Настраиваем формат даты (ДД.ММ.ГГГГ)
+        from openpyxl.styles import numbers
+        date_column = 'E'  # Колонка с датой (после удаления A,B,C это будет колонка E)
+        for row in range(2, len(result_df) + 2):  # +2 из-за заголовка и индексации с 1
+            cell = worksheet[f'{date_column}{row}']
+            cell.number_format = 'DD.MM.YYYY'  # Формат даты для Excel
         
         # Настраиваем ширину колонок
-        worksheet = writer.sheets['ОСВ_плоская']
-        for column in worksheet.columns:
-            max_length = 0
-            column_letter = column[0].column_letter
-            for cell in column:
-                try:
-                    if len(str(cell.value)) > max_length:
-                        max_length = len(str(cell.value))
-                except:
-                    pass
-            adjusted_width = min(max_length + 2, 70)
-            worksheet.column_dimensions[column_letter].width = adjusted_width
+        column_widths = {
+            'A': 10,  # Счет
+            'B': 40,  # Подразделение
+            'C': 70,  # Банковский счет
+            'D': 70,  # Статья ДДС
+            'E': 15,  # Дата
+            'F': 20,  # Дебет
+            'G': 20   # Кредит
+        }
+        
+        for col, width in column_widths.items():
+            worksheet.column_dimensions[col].width = width
+        
+        # Форматируем числа с разделителями
+        for col in ['F', 'G']:  # Дебет и Кредит
+            for row in range(2, len(result_df) + 2):
+                cell = worksheet[f'{col}{row}']
+                cell.number_format = '#,##0.00'  # Формат чисел с разделителями
     
     print("\n" + "="*70)
     print(f"✅ УСПЕШНО! Создано {len(result_df)} строк")
@@ -212,7 +217,7 @@ if result_rows:
     if not result_df['Дата'].isna().all():
         min_date = result_df['Дата'].min()
         max_date = result_df['Дата'].max()
-        print(f"   Период: {min_date.strftime('%d.%m.%y')} - {max_date.strftime('%d.%m.%y')}")
+        print(f"   Период: {min_date.strftime('%d.%m.%Y')} - {max_date.strftime('%d.%m.%Y')}")
     
     # Статистика по подразделениям
     print(f"\n🏢 ПОДРАЗДЕЛЕНИЯ:")
@@ -222,23 +227,23 @@ if result_rows:
             print(f"   📍 {podr}: {count} операций")
     
     # Статистика по статьям ДДС
-    print(f"\n📋 СТАТЬИ ДДС (топ-20):")
-    article_stats = result_df['Статья_ДДС'].value_counts().head(20)
+    print(f"\n📋 СТАТЬИ ДДС (топ-10):")
+    article_stats = result_df['Статья_ДДС'].value_counts().head(10)
     for article, count in article_stats.items():
         if article:
             print(f"   • {article[:70]}: {count} операций")
     
-    # Сохраняем CSV
+    # Сохраняем CSV для совместимости
     csv_path = output_path.replace('.xlsx', '.csv')
     csv_df = result_df.copy()
-    csv_df['Дата'] = csv_df['Дата'].dt.strftime('%d.%m.%y')
+    csv_df['Дата'] = csv_df['Дата'].dt.strftime('%d.%m.%Y')  # В CSV тоже полный год
     csv_df.to_csv(csv_path, index=False, encoding='utf-8-sig')
     print(f"\n📁 Также сохранено в CSV: {csv_path}")
     
     # Показываем пример данных
-    print("\n📋 ПРИМЕР ДАННЫХ (первые 10 строк):")
-    example = result_df.head(10).copy()
-    example['Дата'] = example['Дата'].dt.strftime('%d.%m.%y')
+    print("\n📋 ПРИМЕР ДАННЫХ (первые 5 строк):")
+    example = result_df.head(5).copy()
+    example['Дата'] = example['Дата'].dt.strftime('%d.%m.%Y')
     print(example.to_string())
     
 else:
