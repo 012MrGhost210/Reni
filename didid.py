@@ -2,15 +2,15 @@ import os
 import shutil
 from pathlib import Path
 
-def move_contents_from_nested_folders(source_root, target_base, company_folders):
+def copy_contents_from_nested_folders(source_root, target_base, company_folders):
     """
-    Переносит всё содержимое из указанных папок (company_folders),
+    Копирует всё содержимое из указанных папок (company_folders),
     которые могут лежать на любом уровне вложенности внутри source_root,
     в соответствующие подпапки внутри target_base.
     
     Args:
         source_root (str или Path): Путь к корневой папке, где лежат папки с компаниями.
-        target_base (str или Path): Путь к папке Y, куда всё переносим.
+        target_base (str или Path): Путь к папке Y, куда всё копируем.
         company_folders (list): Список точных названий папок компаний.
     """
     source_root = Path(source_root)
@@ -24,7 +24,8 @@ def move_contents_from_nested_folders(source_root, target_base, company_folders)
     print(f"Ищем папки: {company_folders}")
     print("-" * 50)
     
-    moved_count = 0
+    copied_count = 0
+    skipped_count = 0
     
     for company_folder_name in company_folders:
         # Создаем соответствующую папку в целевой директории
@@ -53,35 +54,28 @@ def move_contents_from_nested_folders(source_root, target_base, company_folders)
                 # Формируем путь назначения в соответствующей подпапке
                 destination_path = company_target_path / item_path.name
                 
-                # Выполняем перенос (с заменой существующих файлов)
                 try:
-                    # Если файл уже существует, удаляем его перед перемещением
-                    if destination_path.exists():
-                        if destination_path.is_dir():
-                            shutil.rmtree(destination_path)
-                        else:
-                            destination_path.unlink()
-                        print(f"    Замена существующего: {destination_path.name}")
+                    # Если элемент - файл
+                    if item_path.is_file():
+                        # Копируем файл с заменой существующего
+                        shutil.copy2(item_path, destination_path)
+                        print(f"    Скопирован файл: {item_path.name}")
+                        copied_count += 1
                     
-                    # Перемещаем файл/папку
-                    shutil.move(str(item_path), str(destination_path))
-                    print(f"    Перемещено: {item_path.name} -> {company_folder_name}/")
-                    moved_count += 1
+                    # Если элемент - папка
+                    elif item_path.is_dir():
+                        # Копируем всю папку рекурсивно (с заменой существующей)
+                        if destination_path.exists():
+                            shutil.rmtree(destination_path)
+                        shutil.copytree(item_path, destination_path)
+                        print(f"    Скопирована папка: {item_path.name}/")
+                        copied_count += 1
                     
                 except Exception as e:
-                    print(f"    Ошибка при перемещении {item_path.name}: {e}")
-            
-            # После переноса всего содержимого, можно удалить пустую папку компании
-            try:
-                # Проверяем, пуста ли папка
-                if not any(company_path.iterdir()):
-                    company_path.rmdir()
-                    print(f"    Удалена пустая папка: {company_path}")
-            except (OSError, Exception):
-                pass  # Папка не пуста или ошибка доступа
+                    print(f"    Ошибка при копировании {item_path.name}: {e}")
     
     print("-" * 50)
-    print(f"Готово! Перемещено элементов: {moved_count}")
+    print(f"Готово! Скопировано элементов: {copied_count}")
 
 if __name__ == "__main__":
     # ВАШИ ПУТИ
@@ -96,4 +90,4 @@ if __name__ == "__main__":
     ]
     
     # Запуск
-    move_contents_from_nested_folders(source_folder, target_folder, companies)
+    copy_contents_from_nested_folders(source_folder, target_folder, companies)
