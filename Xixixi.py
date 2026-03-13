@@ -152,24 +152,24 @@ def process_files(source_root, destinations):
 def main():
     # Настройка корневой папки для поиска
     # ЗАМЕНИТЕ НА ВАШ ПУТЬ
-    source_root = r"C:\путь\к\исходной\папке"
+    source_root = r"\\fs-01.renlife.com\alldocs\Инвестиционный департамент\7.0 Treasury\diadoc_connector\Документооборот завершён"
     
     # Настройка папок назначения с параметрами
     destinations = {
         'raiffeisen': {
             'folder_pattern': 'УК Райффайзен',
             'file_pattern': 'сводный отчет',
-            'dest_path': r'X:\путь\к\папке\Raiffeisen'  # Путь X
+            'dest_path': r'M:\Финансовый департамент\Treasury\3. ЗАКРЫТИЕ\Отчеты УК\Сводные отчеты УК\2026\Райф'  # Путь X
         },
         'sputnik': {
             'folder_pattern': 'СПУТНИК',
             'file_pattern': 'сводный',
-            'dest_path': r'Y:\путь\к\папке\Sputnik'     # Путь Y
+            'dest_path': r'M:\Финансовый департамент\Treasury\3. ЗАКРЫТИЕ\Отчеты УК\Сводные отчеты УК\2026\Спутник'     # Путь Y
         },
         'tkb': {
             'folder_pattern': 'ТКБ',
             'file_pattern': 'сводный отчет',
-            'dest_path': r'Z:\путь\к\папке\TKB'         # Путь Z
+            'dest_path': r'M:\Финансовый департамент\Treasury\3. ЗАКРЫТИЕ\Отчеты УК\Сводные отчеты УК\2026\ТКБ'         # Путь Z
         }
     }
     
