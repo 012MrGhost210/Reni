@@ -120,26 +120,21 @@ def process_files(source_root, destinations):
                                 dest_base = dest_config['dest_path']
                                 month_folder = os.path.join(dest_base, month_num)
                                 
-                                # Создаем папку месяца, если её нет
-                                os.makedirs(month_folder, exist_ok=True)
-                                
-                                # Полный путь к исходному и целевому файлу
-                                src_file = os.path.join(root, file)
-                                dest_file = os.path.join(month_folder, clean_name)
-                                
-                                # Проверяем, не существует ли уже файл
-                                if os.path.exists(dest_file):
-                                    base, ext = os.path.splitext(clean_name)
-                                    counter = 1
-                                    while os.path.exists(dest_file):
-                                        new_name = f"{base}_{counter}{ext}"
-                                        dest_file = os.path.join(month_folder, new_name)
-                                        counter += 1
-                                    logging.info(f"Файл уже существует, создаем копию: {new_name}")
-                                
-                                # Копируем файл
-                                shutil.copy2(src_file, dest_file)
-                                logging.info(f"Файл скопирован: {src_file} -> {dest_file}")
+                                # Проверяем, существует ли папка с нужным месяцем
+                                if os.path.exists(month_folder):
+                                    # Полный путь к исходному и целевому файлу
+                                    src_file = os.path.join(root, file)
+                                    dest_file = os.path.join(month_folder, clean_name)
+                                    
+                                    # Если файл уже существует, просто заменяем его
+                                    if os.path.exists(dest_file):
+                                        logging.info(f"Файл уже существует, будет заменен: {dest_file}")
+                                    
+                                    # Копируем файл (заменяем если существует)
+                                    shutil.copy2(src_file, dest_file)
+                                    logging.info(f"Файл скопирован (с заменой): {src_file} -> {dest_file}")
+                                else:
+                                    logging.warning(f"Папка с месяцем {month_num} не найдена по пути {month_folder}. Файл {file} не скопирован.")
                                 
                             except Exception as e:
                                 logging.error(f"Ошибка при обработке файла {file}: {str(e)}")
@@ -151,7 +146,6 @@ def process_files(source_root, destinations):
 
 def main():
     # Настройка корневой папки для поиска
-    # ЗАМЕНИТЕ НА ВАШ ПУТЬ
     source_root = r"\\fs-01.renlife.com\alldocs\Инвестиционный департамент\7.0 Treasury\diadoc_connector\Документооборот завершён"
     
     # Настройка папок назначения с параметрами
@@ -159,17 +153,17 @@ def main():
         'raiffeisen': {
             'folder_pattern': 'УК Райффайзен',
             'file_pattern': 'сводный отчет',
-            'dest_path': r'M:\Финансовый департамент\Treasury\3. ЗАКРЫТИЕ\Отчеты УК\Сводные отчеты УК\2026\Райф'  # Путь X
+            'dest_path': r'M:\Финансовый департамент\Treasury\3. ЗАКРЫТИЕ\Отчеты УК\Сводные отчеты УК\2026\Райф'
         },
         'sputnik': {
             'folder_pattern': 'СПУТНИК',
             'file_pattern': 'сводный',
-            'dest_path': r'M:\Финансовый департамент\Treasury\3. ЗАКРЫТИЕ\Отчеты УК\Сводные отчеты УК\2026\Спутник'     # Путь Y
+            'dest_path': r'M:\Финансовый департамент\Treasury\3. ЗАКРЫТИЕ\Отчеты УК\Сводные отчеты УК\2026\Спутник'
         },
         'tkb': {
             'folder_pattern': 'ТКБ',
             'file_pattern': 'сводный отчет',
-            'dest_path': r'M:\Финансовый департамент\Treasury\3. ЗАКРЫТИЕ\Отчеты УК\Сводные отчеты УК\2026\ТКБ'         # Путь Z
+            'dest_path': r'M:\Финансовый департамент\Treasury\3. ЗАКРЫТИЕ\Отчеты УК\Сводные отчеты УК\2026\ТКБ'
         }
     }
     
@@ -178,15 +172,11 @@ def main():
         logging.error(f"Исходная папка не существует: {source_root}")
         return
     
-    # Проверяем существование папок назначения
+    # Проверяем существование папок назначения (но не создаем их)
     for dest_type, dest_config in destinations.items():
         dest_path = dest_config['dest_path']
         if not os.path.exists(dest_path):
-            try:
-                os.makedirs(dest_path)
-                logging.info(f"Создана папка назначения: {dest_path}")
-            except Exception as e:
-                logging.error(f"Не удалось создать папку {dest_path}: {str(e)}")
+            logging.warning(f"Папка назначения не существует: {dest_path}. Файлы для {dest_type} не будут сохранены до создания папки.")
     
     # Запускаем обработку
     try:
