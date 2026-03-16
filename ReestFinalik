@@ -22,6 +22,19 @@ EXCEL_FILENAME = "Глоссарий.xlsx"
 # Максимальное количество ключевых слов для отдельных листов
 MAX_KEYWORDS_FOR_SHEETS = 20
 
+# ==================== НАСТРОЙКИ ФИЛЬТРАЦИИ ФАЙЛОВ ====================
+# Исключать временные файлы Excel (начинающиеся с ~$)
+EXCLUDE_TEMP_EXCEL_FILES = True
+
+# Дополнительные паттерны для исключения (можно добавить свои)
+EXCLUDE_PATTERNS = [
+    '~$',           # Временные файлы Excel
+    '.tmp',         # Временные файлы
+    '.temp',        # Временные файлы
+    'thumb.db',     # Системные файлы Windows
+    '.ds_store',    # Системные файлы Mac
+]
+
 # ==================== НАСТРОЙКИ ПОИСКА ====================
 # Чувствительность к регистру при поиске
 CASE_SENSITIVE_SEARCH = True
@@ -40,6 +53,23 @@ CREATE_HYPERLINKS = True
 OPEN_EXCEL_AFTER_CREATION = True
 
 # ==================== КОНЕЦ НАСТРОЕК ====================
+
+def is_excluded_file(filename):
+    """
+    Проверяет, нужно ли исключить файл из обработки
+    """
+    filename_lower = filename.lower()
+    
+    # Проверяем на временные файлы Excel (начинающиеся с ~$)
+    if EXCLUDE_TEMP_EXCEL_FILES and filename.startswith('~$'):
+        return True
+    
+    # Проверяем по дополнительным паттернам
+    for pattern in EXCLUDE_PATTERNS:
+        if pattern.lower() in filename_lower:
+            return True
+    
+    return False
 
 def load_keywords_and_paths():
     """
@@ -111,11 +141,17 @@ def get_files_by_pattern(directory, pattern, mode):
     Возвращает список файлов
     """
     all_files = []
+    excluded_count = 0
     pattern_lower = pattern.lower() if pattern else ""
     
     try:
         for root, dirs, files in os.walk(directory):
             for file in files:
+                # Пропускаем исключенные файлы
+                if is_excluded_file(file):
+                    excluded_count += 1
+                    continue
+                
                 file_path = Path(root) / file
                 
                 # Для режима ALL берем все файлы без фильтрации
@@ -128,6 +164,9 @@ def get_files_by_pattern(directory, pattern, mode):
                         all_files.append(file_path)
     except Exception as e:
         print(f"Ошибка при поиске в {directory}: {e}")
+    
+    if excluded_count > 0:
+        print(f"    Пропущено временных/системных файлов: {excluded_count}")
     
     if mode == 'YES' and all_files:
         # Берем самый свежий файл
@@ -262,7 +301,7 @@ def create_file_hyperlink(file_path):
     except:
         return None
 
-def create_excel_report(files_data, keywords_data, output_path, total_processed):
+def create_excel_report(files_data, keywords_data, output_path, total_processed, excluded_files_count):
     """
     Создает Excel файл с отдельными листами для каждого ключевого слова
     Сохраняет существующий лист "Глоссарий" если он есть
@@ -381,6 +420,7 @@ def create_excel_report(files_data, keywords_data, output_path, total_processed)
             ["Дата создания отчета", datetime.now().strftime('%Y-%m-%d %H:%M:%S')],
             ["Всего обработано файлов", total_processed],
             ["Всего файлов в отчете", len(files_data)],
+            ["Пропущено временных/системных файлов", excluded_files_count],
             ["Всего ключевых слов", len(keywords_list)],
             ["Ключевых слов с отдельными листами", min(len(keywords_list), MAX_KEYWORDS_FOR_SHEETS)],
         ]
@@ -391,6 +431,7 @@ def create_excel_report(files_data, keywords_data, output_path, total_processed)
             ["Чувствительность к регистру", "Да" if CASE_SENSITIVE_SEARCH else "Нет"],
             ["Поиск только в именах файлов", "Да" if SEARCH_IN_FILENAME_ONLY else "Нет"],
             ["Гиперссылки", "Да" if CREATE_HYPERLINKS else "Нет"],
+            ["Исключать временные файлы Excel", "Да" if EXCLUDE_TEMP_EXCEL_FILES else "Нет"],
             ["", ""],
             ["СПИСОК ВСЕХ КЛЮЧЕВЫХ СЛОВ И ПУТЕЙ:", ""],
         ])
@@ -454,6 +495,7 @@ def analyze_files():
     
     # Счетчики
     total_processed = 0
+    total_excluded = 0
     
     print("=" * 80)
     print("АНАЛИЗ ФАЙЛОВ С ПРИВЯЗКОЙ КЛЮЧЕВЫХ СЛОВ К ПАПКАМ")
@@ -461,6 +503,7 @@ def analyze_files():
     
     print(f"Загружено ключевых слов: {len(keywords_data)}")
     print(f"Отчет будет сохранен: {excel_path}")
+    print(f"Исключение временных файлов: {'ВКЛЮЧЕНО' if EXCLUDE_TEMP_EXCEL_FILES else 'ВЫКЛЮЧЕНО'}")
     print("-" * 80)
     
     # Обрабатываем каждое ключевое слово с его путем
@@ -486,6 +529,11 @@ def analyze_files():
         for file_path in files:
             try:
                 filename = file_path.name
+                
+                # Дополнительная проверка на временные файлы (на всякий случай)
+                if is_excluded_file(filename):
+                    total_excluded += 1
+                    continue
                 
                 file_extension = file_path.suffix.lower()
                 if file_extension:
@@ -532,13 +580,15 @@ def analyze_files():
             all_files_data,
             keywords_data,
             excel_path,
-            total_processed
+            total_processed,
+            total_excluded
         )
         
         print("-" * 80)
         print("ИТОГОВЫЕ РЕЗУЛЬТАТЫ:")
         print(f"  Всего обработано файлов: {total_processed}")
         print(f"  Всего записей в отчете: {len(all_files_data)}")
+        print(f"  Пропущено временных/системных файлов: {total_excluded}")
         print(f"  Ключевых слов: {len(keywords_data)}")
         
         if success:
