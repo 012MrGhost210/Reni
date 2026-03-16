@@ -5,6 +5,7 @@ from datetime import datetime
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Font, Alignment, PatternFill
 from openpyxl.formatting.rule import FormulaRule
+from openpyxl.worksheet.hyperlink import Hyperlink
 import re
 
 # ==================== НАСТРОЙКИ ====================
@@ -46,9 +47,9 @@ def load_keywords_and_paths():
     Ожидает структуру:
     Столбец A: ключевое слово
     Столбец B: путь для поиска
-    Столбец C: режим (YES - только последние файлы, NO/пусто - все файлы)
+    Столбец C: режим (YES - только последние файлы, NO - все файлы, ALL - все файлы в папке без фильтрации по ключевому слову)
     
-    Возвращает список словарей: [{'keyword': '...', 'path': '...', 'mode': 'YES/NO'}]
+    Возвращает список словарей: [{'keyword': '...', 'path': '...', 'mode': 'YES/NO/ALL'}]
     """
     try:
         if not os.path.exists(KEYWORDS_EXCEL_FILE):
@@ -84,6 +85,14 @@ def load_keywords_and_paths():
         
         print(f"Загружено ключевых слов с путями: {len(keywords_data)}")
         
+        # Статистика по режимам
+        modes_count = {}
+        for item in keywords_data:
+            mode = item['mode']
+            modes_count[mode] = modes_count.get(mode, 0) + 1
+        
+        print(f"  Режимы: {modes_count}")
+        
         return keywords_data
         
     except Exception as e:
@@ -92,33 +101,36 @@ def load_keywords_and_paths():
         traceback.print_exc()
         return []
 
-def get_latest_files_by_pattern(directory, pattern, mode):
+def get_files_by_pattern(directory, pattern, mode):
     """
     Получает список файлов в зависимости от режима:
-    - Если mode = 'YES': только самый свежий файл для каждого шаблона
-    - Если mode = 'NO' или другой: все файлы
+    - Если mode = 'YES': только самый свежий файл, содержащий pattern
+    - Если mode = 'NO': все файлы, содержащие pattern
+    - Если mode = 'ALL': все файлы в директории (без фильтрации по pattern)
     
     Возвращает список файлов
     """
     all_files = []
-    pattern_lower = pattern.lower()
+    pattern_lower = pattern.lower() if pattern else ""
     
     try:
         for root, dirs, files in os.walk(directory):
             for file in files:
-                file_lower = file.lower()
+                file_path = Path(root) / file
                 
-                # Проверяем наличие паттерна в имени файла
-                if pattern_lower in file_lower:
-                    file_path = Path(root) / file
+                # Для режима ALL берем все файлы без фильтрации
+                if mode == 'ALL':
                     all_files.append(file_path)
+                else:
+                    # Для режимов YES и NO фильтруем по паттерну
+                    file_lower = file.lower()
+                    if pattern_lower in file_lower:
+                        all_files.append(file_path)
     except Exception as e:
         print(f"Ошибка при поиске в {directory}: {e}")
     
     if mode == 'YES' and all_files:
-        # Группируем файлы по паттерну и берем самый свежий
-        # В данном случае у нас один паттерн, но файлы могут быть в разных папках
-        # Сортируем по дате изменения и берем самый свежий
+        # Берем самый свежий файл
         latest_file = max(all_files, key=lambda x: os.path.getmtime(x) if os.path.exists(x) else 0)
         return [latest_file]
     
@@ -128,6 +140,9 @@ def check_keyword_match(file_path, filename, keyword, case_sensitive):
     """
     Проверяет, содержит ли файл/путь указанное ключевое слово
     """
+    if not keyword:  # Пустое ключевое слово (для режима ALL)
+        return True
+    
     if not case_sensitive:
         search_text = filename.lower() if SEARCH_IN_FILENAME_ONLY else str(file_path).lower()
         keyword = keyword.lower()
@@ -136,10 +151,32 @@ def check_keyword_match(file_path, filename, keyword, case_sensitive):
     
     return keyword in search_text
 
+def add_back_to_glossary_hyperlink(worksheet):
+    """
+    Добавляет гиперссылку на лист Глоссарий в ячейку A1
+    """
+    # Текст в ячейке A1
+    cell = worksheet.cell(row=1, column=1, value="<< НАЗАД К ГЛОССАРИЮ")
+    
+    # Стиль для гиперссылки
+    cell.font = Font(color="0563C1", underline="single", bold=True)
+    cell.alignment = Alignment(horizontal='left', vertical='center')
+    
+    # Создаем гиперссылку на лист Глоссарий
+    cell.hyperlink = "#Глоссарий!A1"
+    
+    # Объединяем ячейки A1:C1 для лучшего отображения
+    worksheet.merge_cells('A1:C1')
+    
+    return cell
+
 def format_worksheet(worksheet, title, has_data=True):
     """
     Форматирует отдельный лист Excel
     """
+    # Добавляем гиперссылку на Глоссарий в A1
+    add_back_to_glossary_hyperlink(worksheet)
+    
     # Устанавливаем ширину столбцов
     column_widths = {
         'A': 40,   # Имя файла
@@ -153,27 +190,27 @@ def format_worksheet(worksheet, title, has_data=True):
     for col, width in column_widths.items():
         worksheet.column_dimensions[col].width = width
     
-    # Форматируем заголовки
+    # Форматируем заголовки (теперь они во 2 строке)
     header_font = Font(bold=True, color="FFFFFF", size=12)
     header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
     
     headers = ["Имя файла", "Тип файла", "Дата изменения", "Полный путь", "Ключевое слово", "Папка поиска"]
     
     for col, header in enumerate(headers, 1):
-        cell = worksheet.cell(row=1, column=col, value=header)
+        cell = worksheet.cell(row=2, column=col, value=header)
         cell.font = header_font
         cell.fill = header_fill
         cell.alignment = Alignment(horizontal='center', vertical='center')
     
     if has_data:
-        # Делаем автофильтр
-        worksheet.auto_filter.ref = f"A1:F{worksheet.max_row}"
+        # Делаем автофильтр (начиная со 2 строки)
+        worksheet.auto_filter.ref = f"A2:F{worksheet.max_row}"
         
         # Настраиваем стиль для гиперссылок
         hyperlink_font = Font(color="0563C1", underline="single")
         
-        # Применяем стиль гиперссылок
-        for row in range(2, worksheet.max_row + 1):
+        # Применяем стиль гиперссылок (начиная с 3 строки)
+        for row in range(3, worksheet.max_row + 1):
             path_cell = worksheet.cell(row=row, column=4)
             
             if CREATE_HYPERLINKS and path_cell.hyperlink:
@@ -183,15 +220,15 @@ def format_worksheet(worksheet, title, has_data=True):
                 name_cell.hyperlink = path_cell.hyperlink
                 name_cell.font = hyperlink_font
         
-        # Условное форматирование для дат
+        # Условное форматирование для дат (начиная с 3 строки)
         date_column_letter = 'C'
-        date_range = f"{date_column_letter}2:{date_column_letter}{worksheet.max_row}"
+        date_range = f"{date_column_letter}3:{date_column_letter}{worksheet.max_row}"
         
         today_fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
         today_font = Font(color="006100")
         
         today_rule = FormulaRule(
-            formula=[f'AND(${date_column_letter}2>=TODAY(), ${date_column_letter}2<TODAY()+1)'],
+            formula=[f'AND(${date_column_letter}3>=TODAY(), ${date_column_letter}3<TODAY()+1)'],
             fill=today_fill,
             font=today_font
         )
@@ -201,14 +238,14 @@ def format_worksheet(worksheet, title, has_data=True):
         old_font = Font(color="9C0006")
         
         old_rule = FormulaRule(
-            formula=[f'${date_column_letter}2<TODAY()-30'],
+            formula=[f'${date_column_letter}3<TODAY()-30'],
             fill=old_fill,
             font=old_font
         )
         worksheet.conditional_formatting.add(date_range, old_rule)
     
-    # Замораживаем первую строку
-    worksheet.freeze_panes = "A2"
+    # Замораживаем вторую строку (заголовки)
+    worksheet.freeze_panes = "A3"
 
 def create_file_hyperlink(file_path):
     """
@@ -285,8 +322,11 @@ def create_excel_report(files_data, keywords_data, output_path, total_processed)
             ws = workbook.create_sheet(sheet_name)
             files_for_keyword = keyword_files.get(keyword, [])
             
-            # Заполняем лист
-            for row_idx, row_data in enumerate(files_for_keyword, 2):
+            # Добавляем гиперссылку на Глоссарий в A1
+            add_back_to_glossary_hyperlink(ws)
+            
+            # Заполняем лист данными (начиная с 3 строки, после заголовков)
+            for row_idx, row_data in enumerate(files_for_keyword, 3):
                 for col_idx, value in enumerate(row_data, 1):
                     ws.cell(row=row_idx, column=col_idx, value=value)
                     
@@ -298,8 +338,8 @@ def create_excel_report(files_data, keywords_data, output_path, total_processed)
             
             format_worksheet(ws, sheet_name, bool(files_for_keyword))
             
-            # Добавляем информацию о количестве
-            info_row = len(files_for_keyword) + 3
+            # Добавляем информацию о количестве (после данных)
+            info_row = len(files_for_keyword) + 4
             ws.cell(row=info_row, column=1, value=f"Найдено файлов: {len(files_for_keyword)}")
             ws.cell(row=info_row, column=1).font = Font(bold=True, size=12)
             
@@ -308,9 +348,16 @@ def create_excel_report(files_data, keywords_data, output_path, total_processed)
         # Если ключевых слов больше MAX_KEYWORDS_FOR_SHEETS, создаем дополнительный лист
         if len(keywords_list) > MAX_KEYWORDS_FOR_SHEETS:
             ws_extra = workbook.create_sheet("Остальные ключевые слова")
-            extra_keywords = keywords_list[MAX_KEYWORDS_FOR_SHEETS:]
             
-            row_idx = 2
+            # Добавляем гиперссылку на Глоссарий
+            add_back_to_glossary_hyperlink(ws_extra)
+            
+            # Заголовки
+            ws_extra.cell(row=2, column=1, value="Ключевое слово").font = Font(bold=True)
+            ws_extra.cell(row=2, column=2, value="Количество файлов").font = Font(bold=True)
+            
+            extra_keywords = keywords_list[MAX_KEYWORDS_FOR_SHEETS:]
+            row_idx = 3
             for keyword in extra_keywords:
                 ws_extra.cell(row=row_idx, column=1, value=keyword)
                 count = len(keyword_files.get(keyword, []))
@@ -319,14 +366,15 @@ def create_excel_report(files_data, keywords_data, output_path, total_processed)
             
             ws_extra.column_dimensions['A'].width = 40
             ws_extra.column_dimensions['B'].width = 20
-            ws_extra.cell(row=1, column=1, value="Ключевое слово").font = Font(bold=True)
-            ws_extra.cell(row=1, column=2, value="Количество файлов").font = Font(bold=True)
-            ws_extra.freeze_panes = "A2"
+            ws_extra.freeze_panes = "A3"
             
             print(f"   Остальные ключевые слова: {len(extra_keywords)} шт.")
         
         # Создаем лист со статистикой
         ws_stats = workbook.create_sheet("Статистика")
+        
+        # Добавляем гиперссылку на Глоссарий
+        add_back_to_glossary_hyperlink(ws_stats)
         
         stats_data = [
             ["Параметр", "Значение"],
@@ -354,17 +402,18 @@ def create_excel_report(files_data, keywords_data, output_path, total_processed)
                 f"Путь: {item['path']} (режим: {item['mode']})"
             ])
         
-        # Заполняем статистику
-        for row_idx, row_data in enumerate(stats_data, 1):
+        # Заполняем статистику (начиная с 3 строки)
+        for row_idx, row_data in enumerate(stats_data, 3):
             for col_idx, value in enumerate(row_data, 1):
                 cell = ws_stats.cell(row=row_idx, column=col_idx, value=value)
-                if row_idx == 1:
+                if row_idx == 3:  # Заголовок
                     cell.font = Font(bold=True)
                     cell.fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
                     cell.font = Font(bold=True, color="FFFFFF")
         
         ws_stats.column_dimensions['A'].width = 30
         ws_stats.column_dimensions['B'].width = 80
+        ws_stats.freeze_panes = "A4"
         
         # Сохраняем файл
         workbook.save(output_path)
@@ -388,6 +437,9 @@ def analyze_files():
     """
     Анализирует файлы на основе ключевых слов и соответствующих путей
     """
+    # Создаем папку для отчета, если её нет
+    Path(OUTPUT_DIRECTORY).mkdir(parents=True, exist_ok=True)
+    
     excel_path = Path(OUTPUT_DIRECTORY) / EXCEL_FILENAME
     
     # Загружаем ключевые слова и пути
@@ -417,12 +469,18 @@ def analyze_files():
         source_dir = item['path']
         mode = item['mode']
         
+        mode_description = {
+            'YES': 'только последние файлы',
+            'NO': 'все файлы с ключевым словом',
+            'ALL': 'все файлы в папке'
+        }.get(mode, 'все файлы с ключевым словом')
+        
         print(f"\nОбрабатываем ключевое слово: '{keyword}'")
         print(f"  Путь: {source_dir}")
-        print(f"  Режим: {'только последние файлы' if mode == 'YES' else 'все файлы'}")
+        print(f"  Режим: {mode_description}")
         
         # Получаем файлы для этого ключевого слова
-        files = get_latest_files_by_pattern(source_dir, keyword, mode)
+        files = get_files_by_pattern(source_dir, keyword, mode)
         
         keyword_file_count = 0
         for file_path in files:
@@ -456,6 +514,9 @@ def analyze_files():
                 keyword_file_count += 1
                 total_processed += 1
                 
+                if SHOW_DETAILS and keyword_file_count % 100 == 0:
+                    print(f"    Обработано {keyword_file_count} файлов...")
+                
             except Exception as e:
                 print(f"  Ошибка при обработке файла {file_path}: {e}")
                 continue
@@ -485,6 +546,7 @@ def analyze_files():
             
             if CREATE_HYPERLINKS:
                 print(f"  Гиперссылки добавлены к именам файлов и путям")
+                print(f"  На каждом листе есть ссылка для возврата к Глоссарию")
             
             if OPEN_EXCEL_AFTER_CREATION:
                 print(f"  Открываю Excel файл...")
