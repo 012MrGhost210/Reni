@@ -13,13 +13,13 @@ KEYWORDS_EXCEL_FILE = r'\\fs-01.renlife.com\alldocs\Инвестиционный
 KEYWORDS_EXCEL_SHEET = 'Лист1'  # Название листа с ключевыми словами
 
 # Папка для сохранения Excel файла
-OUTPUT_DIRECTORY = r'\\fs-01.renlife.com\alldocs\Инвестиционный департамент\7.0 Treasury'
+OUTPUT_DIRECTORY = r'\\fs-01.renlife.com\alldocs\Инвестиционный департамент\7.0 Treasury\Глоссарий'
 
 # Название Excel файла с отчетом (основной файл, где есть лист "Глоссарий")
 EXCEL_FILENAME = "Глоссарий.xlsx"
 
 # Максимальное количество ключевых слов для отдельных листов
-MAX_KEYWORDS_FOR_SHEETS = 10
+MAX_KEYWORDS_FOR_SHEETS = 20
 
 # ==================== НАСТРОЙКИ ПОИСКА ====================
 # Чувствительность к регистру при поиске
