@@ -4,8 +4,8 @@ import re
 from datetime import datetime
 
 # --- НАСТРОЙКИ ---
-source_root = r"путь_к_вашей_основной_папке"  # Укажите путь к папке, где лежат 3 подпапки
-destination_folder = r"путь_к_папке_X"       # Укажите путь к папке X (куда копировать)
+source_root = r"\\fs-01.renlife.com\alldocs\Инвестиционный департамент\7.0 Treasury\diadoc_connector\Документооборот завершён"  # Укажите путь к папке, где лежат 3 подпапки
+destination_folder = r"\\fs-01.renlife.com\alldocs\Инвестиционный департамент\7.0 Treasury\25.Автоматизация\NAV for DI"       # Укажите путь к папке X (куда копировать)
 
 # Соответствие папок: (путь, что_ищем, короткое_имя_для_вывода)
 TARGETS = [
