@@ -52,41 +52,45 @@ def clear_folder(folder_path):
                 print(f"  Ошибка при очистке {file_path}: {e}")
 
 def process_folder(target, source_root, destination_folder):
-    """Ищет файл в конкретной подпапке, проверяет дату и копирует."""
+    """Ищет САМЫЙ СВЕЖИЙ файл в конкретной подпапке, проверяет дату и копирует."""
     folder_path = os.path.join(source_root, target["path"])
     short_name = target["short_name"]
     search_pattern = target["search_pattern"]
-    found_file = None
+    
+    matching_files = []
     found_date = None
 
     if not os.path.exists(folder_path):
         print(f"{short_name} не ок (папка не найдена)")
         return
 
-    # Ищем файл, содержащий нужную фразу
+    # Собираем ВСЕ файлы, содержащие нужную фразу
     for filename in os.listdir(folder_path):
         if search_pattern.lower() in filename.lower():
             file_path = os.path.join(folder_path, filename)
             if os.path.isfile(file_path):
                 mod_time = os.path.getmtime(file_path)
                 mod_date = datetime.fromtimestamp(mod_time)
-                found_file = filename
-                found_date = mod_date
-                break
+                matching_files.append((filename, mod_date, file_path))
 
-    # Если файл не найден
-    if not found_file:
-        print(f"{short_name} не ок (файл не найден)")
+    # Если файлы не найдены
+    if not matching_files:
+        print(f"{short_name} не ок (файлы не найдены)")
         return
 
-    # Проверяем дату
-    if not is_today(found_date):
-        print(f"{short_name} не ок (дата {found_date.date()} не сегодня)")
+    # Сортируем по дате (самый свежий первый)
+    matching_files.sort(key=lambda x: x[1], reverse=True)
+    latest_file, latest_date, latest_path = matching_files[0]
+
+    # Проверяем дату самого свежего файла
+    if not is_today(latest_date):
+        print(f"{short_name} не ок (самый свежий файл от {latest_date.date()})")
+        # Для отладки можно раскомментировать:
+        # print(f"  Найдены файлы: {[f[0] for f in matching_files]}")
         return
 
     # Копируем файл
-    source_file = os.path.join(folder_path, found_file)
-    new_filename = remove_text_in_braces(found_file)
+    new_filename = remove_text_in_braces(latest_file)
     destination_file = os.path.join(destination_folder, new_filename)
 
     # Если в папке назначения уже есть файл с таким именем, добавляем префикс
@@ -97,7 +101,7 @@ def process_folder(target, source_root, destination_folder):
         counter += 1
 
     try:
-        shutil.copy2(source_file, destination_file)
+        shutil.copy2(latest_path, destination_file)
         print(f"{short_name} ок")
     except Exception as e:
         print(f"{short_name} не ок (ошибка копирования)")
