@@ -7,34 +7,29 @@ from datetime import datetime
 source_root = r"путь_к_вашей_основной_папке"  # Укажите путь к папке, где лежат 3 подпапки
 destination_folder = r"путь_к_папке_X"       # Укажите путь к папке X (куда копировать)
 
-# Соответствие папок: (путь, что_ищем, комментарий для лога)
+# Соответствие папок: (путь, что_ищем, короткое_имя_для_вывода)
 TARGETS = [
     {
-        "name": "Спутник",
+        "short_name": "Спутник",
         "path": "7744000951-АО -УК -СПУТНИК - УПРАВЛЕНИЕ КАПИТАЛОМ-",
-        "search_pattern": "Вознаграждение",
-        "log_name": "Спутнику"
+        "search_pattern": "Вознаграждение"
     },
     {
-        "name": "Райффайзен",
+        "short_name": "Райф",
         "path": "7702358512-ООО -УК Райффайзен-",
-        "search_pattern": "Отчет по СЧА",
-        "log_name": "Райффайзен"
+        "search_pattern": "Отчет по СЧА"
     },
     {
-        "name": "ТКБ",
+        "short_name": "ТКБ",
         "path": "7825489723-ТКБ Инвестмент Партнерс (АО)",
-        "search_pattern": "Сводная РСА-СЧА",
-        "log_name": "ТКБ"
+        "search_pattern": "Сводная РСА-СЧА"
     }
 ]
 
 # --- ФУНКЦИИ ---
 def remove_text_in_braces(filename):
     """Удаляет из имени файла все, что находится в фигурных скобках, включая сами скобки."""
-    # Удаляем {текст} (в том числе, если скобки не закрыты, но мы предполагаем корректный формат)
     new_name = re.sub(r'\{.*?\}', '', filename)
-    # Также удаляем возможные лишние пробелы, которые могли появиться
     new_name = re.sub(r'\s+', ' ', new_name).strip()
     return new_name
 
@@ -43,39 +38,50 @@ def is_today(date):
     today = datetime.now().date()
     return date.date() == today
 
+def clear_folder(folder_path):
+    """Очищает папку: удаляет все файлы и подпапки."""
+    if os.path.exists(folder_path):
+        for filename in os.listdir(folder_path):
+            file_path = os.path.join(folder_path, filename)
+            try:
+                if os.path.isfile(file_path) or os.path.islink(file_path):
+                    os.unlink(file_path)
+                elif os.path.isdir(file_path):
+                    shutil.rmtree(file_path)
+            except Exception as e:
+                print(f"  Ошибка при очистке {file_path}: {e}")
+
 def process_folder(target, source_root, destination_folder):
     """Ищет файл в конкретной подпапке, проверяет дату и копирует."""
     folder_path = os.path.join(source_root, target["path"])
-    log_name = target["log_name"]
+    short_name = target["short_name"]
     search_pattern = target["search_pattern"]
     found_file = None
     found_date = None
 
-    print(f"Проверяем папку: {folder_path}")
-
     if not os.path.exists(folder_path):
-        print(f"  Папка {folder_path} не найдена. Пропускаем.")
+        print(f"{short_name} не ок (папка не найдена)")
         return
 
     # Ищем файл, содержащий нужную фразу
     for filename in os.listdir(folder_path):
-        if search_pattern.lower() in filename.lower():  # регистронезависимый поиск
+        if search_pattern.lower() in filename.lower():
             file_path = os.path.join(folder_path, filename)
             if os.path.isfile(file_path):
                 mod_time = os.path.getmtime(file_path)
                 mod_date = datetime.fromtimestamp(mod_time)
                 found_file = filename
                 found_date = mod_date
-                break  # берем первый подходящий файл
+                break
 
     # Если файл не найден
     if not found_file:
-        print(f"  Файл с '{search_pattern}' не найден в папке {log_name}.")
+        print(f"{short_name} не ок (файл не найден)")
         return
 
     # Проверяем дату
     if not is_today(found_date):
-        print(f"  Найден файл '{found_file}', но его дата ({found_date.date()}) не сегодняшняя. Пропускаем. (Данных по {log_name} нет)")
+        print(f"{short_name} не ок (дата {found_date.date()} не сегодня)")
         return
 
     # Копируем файл
@@ -83,7 +89,7 @@ def process_folder(target, source_root, destination_folder):
     new_filename = remove_text_in_braces(found_file)
     destination_file = os.path.join(destination_folder, new_filename)
 
-    # Если в папке назначения уже есть файл с таким именем, добавляем префикс, чтобы не перезаписать
+    # Если в папке назначения уже есть файл с таким именем, добавляем префикс
     base, ext = os.path.splitext(new_filename)
     counter = 1
     while os.path.exists(destination_file):
@@ -91,21 +97,23 @@ def process_folder(target, source_root, destination_folder):
         counter += 1
 
     try:
-        shutil.copy2(source_file, destination_file)  # copy2 сохраняет метаданные
-        print(f"  УСПЕХ: Скопирован '{found_file}' -> '{os.path.basename(destination_file)}'")
+        shutil.copy2(source_file, destination_file)
+        print(f"{short_name} ок")
     except Exception as e:
-        print(f"  ОШИБКА при копировании: {e}")
+        print(f"{short_name} не ок (ошибка копирования)")
 
 # --- ЗАПУСК ---
 if __name__ == "__main__":
-    # Проверяем, существует ли папка назначения, если нет - создаем
+    # Очищаем папку назначения
+    print("Очищаем папку X...")
+    clear_folder(destination_folder)
+    
+    # Создаем папку назначения, если её нет
     if not os.path.exists(destination_folder):
         os.makedirs(destination_folder)
-        print(f"Создана папка назначения: {destination_folder}")
-
-    print(f"Начинаем обработку. Папка назначения: {destination_folder}\n")
+    
+    print("\nРезультаты:")
     for target in TARGETS:
         process_folder(target, source_root, destination_folder)
-        print("-" * 50)
 
-    print("Готово!")
+    print("\nГотово!")
