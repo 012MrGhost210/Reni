@@ -1,0 +1,201 @@
+import os
+from datetime import datetime, timedelta
+import sys
+
+# --- НАСТРОЙКИ ---
+source_root = r"\\fs-01.renlife.com\alldocs\Инвестиционный департамент\7.0 Treasury\diadoc_connector\Документооборот завершён"
+
+# Соответствие папок: (путь, что_ищем, короткое_имя_для_вывода)
+TARGETS = [
+    {
+        "short_name": "Спутник",
+        "path": "7744000951-АО -УК -СПУТНИК - УПРАВЛЕНИЕ КАПИТАЛОМ-",
+        "search_pattern": "Вознаграждение"
+    },
+    {
+        "short_name": "Райф",
+        "path": "7702358512-ООО -УК Райффайзен-",
+        "search_pattern": "Отчет по СЧА"
+    },
+    {
+        "short_name": "ТКБ",
+        "path": "7825489723-ТКБ Инвестмент Партнерс (АО)",
+        "search_pattern": "Сводная РСА-СЧА"
+    }
+]
+
+def check_file_freshness(days_threshold=1):
+    """
+    Проверяет наличие свежих файлов в каждой папке
+    days_threshold - сколько дней файл считается свежим (по умолчанию 1)
+    """
+    print("="*60)
+    print(f"ПРОВЕРКА СВЕЖЕСТИ ФАЙЛОВ (не старше {days_threshold} дн.)")
+    print("="*60)
+    print(f"Дата и время проверки: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}")
+    print("-"*60)
+    
+    all_fresh = True
+    results = []
+    
+    for target in TARGETS:
+        folder_path = os.path.join(source_root, target["path"])
+        short_name = target["short_name"]
+        search_pattern = target["search_pattern"]
+        
+        print(f"\n▶ {short_name}:")
+        
+        # Проверка существования папки
+        if not os.path.exists(folder_path):
+            print(f"  ❌ Папка не найдена: {folder_path}")
+            all_fresh = False
+            results.append({"company": short_name, "status": "error", "message": "папка не найдена"})
+            continue
+        
+        # Сбор файлов
+        matching_files = []
+        for filename in os.listdir(folder_path):
+            if search_pattern.lower() in filename.lower():
+                file_path = os.path.join(folder_path, filename)
+                if os.path.isfile(file_path):
+                    mod_time = os.path.getmtime(file_path)
+                    mod_date = datetime.fromtimestamp(mod_time)
+                    file_size = os.path.getsize(file_path) / 1024  # в КБ
+                    matching_files.append({
+                        "name": filename,
+                        "path": file_path,
+                        "date": mod_date,
+                        "size_kb": round(file_size, 1)
+                    })
+        
+        # Сортировка по дате (свежие сверху)
+        matching_files.sort(key=lambda x: x["date"], reverse=True)
+        
+        if not matching_files:
+            print(f"  ❌ Файлы с паттерном '{search_pattern}' не найдены")
+            all_fresh = False
+            results.append({"company": short_name, "status": "error", "message": "файлы не найдены"})
+            continue
+        
+        # Анализ свежести
+        threshold_date = datetime.now() - timedelta(days=days_threshold)
+        fresh_files = [f for f in matching_files if f["date"] > threshold_date]
+        
+        if fresh_files:
+            latest = fresh_files[0]
+            days_old = (datetime.now() - latest["date"]).days
+            hours_old = (datetime.now() - latest["date"]).seconds // 3600
+            
+            if days_old == 0:
+                age_text = f"сегодня в {latest['date'].strftime('%H:%M')}"
+            elif days_old == 1:
+                age_text = f"вчера в {latest['date'].strftime('%H:%M')}"
+            else:
+                age_text = f"{days_old} дн. назад"
+            
+            print(f"  ✅ Свежий файл найден: {latest['name']}")
+            print(f"     📅 Дата: {latest['date'].strftime('%d.%m.%Y %H:%M')} ({age_text})")
+            print(f"     📦 Размер: {latest['size_kb']} КБ")
+            print(f"     📁 Всего файлов: {len(matching_files)}")
+            
+            results.append({
+                "company": short_name, 
+                "status": "ok", 
+                "fresh_count": len(fresh_files),
+                "latest": latest,
+                "total": len(matching_files)
+            })
+        else:
+            latest = matching_files[0]
+            days_old = (datetime.now() - latest["date"]).days
+            
+            print(f"  ❌ Нет свежих файлов! Самый новый:")
+            print(f"     📅 От {latest['date'].strftime('%d.%m.%Y %H:%M')} ({days_old} дн. назад)")
+            print(f"     📄 {latest['name']}")
+            print(f"     📦 Размер: {latest['size_kb']} КБ")
+            
+            all_fresh = False
+            results.append({
+                "company": short_name, 
+                "status": "stale", 
+                "latest": latest,
+                "days_old": days_old
+            })
+    
+    # Итоговый отчет
+    print("\n" + "="*60)
+    print("ИТОГ ПРОВЕРКИ:")
+    print("="*60)
+    
+    fresh_count = sum(1 for r in results if r.get("status") == "ok")
+    stale_count = sum(1 for r in results if r.get("status") == "stale")
+    error_count = sum(1 for r in results if r.get("status") == "error")
+    
+    print(f"✅ Свежие: {fresh_count}")
+    if stale_count > 0:
+        print(f"⚠️ Устаревшие: {stale_count}")
+    if error_count > 0:
+        print(f"❌ Ошибки: {error_count}")
+    
+    if all_fresh:
+        print("\n✅ ВСЕ ФАЙЛЫ СВЕЖИЕ! Можно запускать обработку.")
+    else:
+        print("\n⚠️ ЕСТЬ ПРОБЛЕМЫ. Требуется внимание.")
+    
+    return all_fresh, results
+
+def quick_check():
+    """Быстрая проверка только наличия свежих файлов"""
+    print("Быстрая проверка свежести файлов...")
+    
+    for target in TARGETS:
+        folder_path = os.path.join(source_root, target["path"])
+        short_name = target["short_name"]
+        search_pattern = target["search_pattern"]
+        
+        if not os.path.exists(folder_path):
+            print(f"{short_name}: ❌ папка не найдена")
+            continue
+        
+        # Сбор файлов за последние 2 дня
+        matching_files = []
+        for filename in os.listdir(folder_path):
+            if search_pattern.lower() in filename.lower():
+                file_path = os.path.join(folder_path, filename)
+                if os.path.isfile(file_path):
+                    mod_time = os.path.getmtime(file_path)
+                    mod_date = datetime.fromtimestamp(mod_time)
+                    matching_files.append((mod_date, filename))
+        
+        if not matching_files:
+            print(f"{short_name}: ❌ файлы не найдены")
+            continue
+        
+        # Самый свежий
+        latest_date, latest_name = max(matching_files, key=lambda x: x[0])
+        days_old = (datetime.now() - latest_date).days
+        
+        if days_old == 0:
+            print(f"{short_name}: ✅ свежий (сегодня)")
+        elif days_old == 1:
+            print(f"{short_name}: ⚠️ вчерашний")
+        else:
+            print(f"{short_name}: ❌ устарел ({days_old} дн.)")
+
+if __name__ == "__main__":
+    # Можно задать порог дней через аргумент командной строки
+    if len(sys.argv) > 1:
+        try:
+            days = int(sys.argv[1])
+            check_file_freshness(days)
+        except:
+            print("Использование: python check_files.py [порог_дней]")
+            check_file_freshness()
+    else:
+        # Подробная проверка
+        check_file_freshness()
+        
+        print("\n" + "="*60)
+        print("Или используйте быструю проверку:")
+        print("="*60)
+        quick_check()
