@@ -47,7 +47,7 @@ def check_file_freshness(days_threshold=1):
         
         # Проверка существования папки
         if not os.path.exists(folder_path):
-            print(f"  ❌ Папка не найдена: {folder_path}")
+            print(f"  [ОШИБКА] Папка не найдена: {folder_path}")
             all_fresh = False
             results.append({"company": short_name, "status": "error", "message": "папка не найдена"})
             continue
@@ -72,7 +72,7 @@ def check_file_freshness(days_threshold=1):
         matching_files.sort(key=lambda x: x["date"], reverse=True)
         
         if not matching_files:
-            print(f"  ❌ Файлы с паттерном '{search_pattern}' не найдены")
+            print(f"  [ОШИБКА] Файлы с паттерном '{search_pattern}' не найдены")
             all_fresh = False
             results.append({"company": short_name, "status": "error", "message": "файлы не найдены"})
             continue
@@ -93,10 +93,10 @@ def check_file_freshness(days_threshold=1):
             else:
                 age_text = f"{days_old} дн. назад"
             
-            print(f"  ✅ Свежий файл найден: {latest['name']}")
-            print(f"     📅 Дата: {latest['date'].strftime('%d.%m.%Y %H:%M')} ({age_text})")
-            print(f"     📦 Размер: {latest['size_kb']} КБ")
-            print(f"     📁 Всего файлов: {len(matching_files)}")
+            print(f"  [OK] Свежий файл найден: {latest['name']}")
+            print(f"     Дата: {latest['date'].strftime('%d.%m.%Y %H:%M')} ({age_text})")
+            print(f"     Размер: {latest['size_kb']} КБ")
+            print(f"     Всего файлов: {len(matching_files)}")
             
             results.append({
                 "company": short_name, 
@@ -109,10 +109,10 @@ def check_file_freshness(days_threshold=1):
             latest = matching_files[0]
             days_old = (datetime.now() - latest["date"]).days
             
-            print(f"  ❌ Нет свежих файлов! Самый новый:")
-            print(f"     📅 От {latest['date'].strftime('%d.%m.%Y %H:%M')} ({days_old} дн. назад)")
-            print(f"     📄 {latest['name']}")
-            print(f"     📦 Размер: {latest['size_kb']} КБ")
+            print(f"  [ОШИБКА] Нет свежих файлов! Самый новый:")
+            print(f"     От {latest['date'].strftime('%d.%m.%Y %H:%M')} ({days_old} дн. назад)")
+            print(f"     {latest['name']}")
+            print(f"     Размер: {latest['size_kb']} КБ")
             
             all_fresh = False
             results.append({
@@ -131,16 +131,16 @@ def check_file_freshness(days_threshold=1):
     stale_count = sum(1 for r in results if r.get("status") == "stale")
     error_count = sum(1 for r in results if r.get("status") == "error")
     
-    print(f"✅ Свежие: {fresh_count}")
+    print(f"Свежие: {fresh_count}")
     if stale_count > 0:
-        print(f"⚠️ Устаревшие: {stale_count}")
+        print(f"Устаревшие: {stale_count}")
     if error_count > 0:
-        print(f"❌ Ошибки: {error_count}")
+        print(f"Ошибки: {error_count}")
     
     if all_fresh:
-        print("\n✅ ВСЕ ФАЙЛЫ СВЕЖИЕ! Можно запускать обработку.")
+        print("\nРЕЗУЛЬТАТ: Все файлы свежие! Можно запускать обработку.")
     else:
-        print("\n⚠️ ЕСТЬ ПРОБЛЕМЫ. Требуется внимание.")
+        print("\nРЕЗУЛЬТАТ: Есть проблемы. Требуется внимание.")
     
     return all_fresh, results
 
@@ -154,7 +154,7 @@ def quick_check():
         search_pattern = target["search_pattern"]
         
         if not os.path.exists(folder_path):
-            print(f"{short_name}: ❌ папка не найдена")
+            print(f"{short_name}: [ОШИБКА] папка не найдена")
             continue
         
         # Сбор файлов за последние 2 дня
@@ -168,7 +168,7 @@ def quick_check():
                     matching_files.append((mod_date, filename))
         
         if not matching_files:
-            print(f"{short_name}: ❌ файлы не найдены")
+            print(f"{short_name}: [ОШИБКА] файлы не найдены")
             continue
         
         # Самый свежий
@@ -176,11 +176,11 @@ def quick_check():
         days_old = (datetime.now() - latest_date).days
         
         if days_old == 0:
-            print(f"{short_name}: ✅ свежий (сегодня)")
+            print(f"{short_name}: [OK] свежий (сегодня)")
         elif days_old == 1:
-            print(f"{short_name}: ⚠️ вчерашний")
+            print(f"{short_name}: [ВНИМАНИЕ] вчерашний")
         else:
-            print(f"{short_name}: ❌ устарел ({days_old} дн.)")
+            print(f"{short_name}: [ОШИБКА] устарел ({days_old} дн.)")
 
 if __name__ == "__main__":
     # Можно задать порог дней через аргумент командной строки
