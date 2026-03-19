@@ -1,17 +1,36 @@
 import os
 import shutil
 from pathlib import Path
+import win32com.client as win32
+from datetime import datetime
 
-def copy_contents_from_nested_folders(source_root, target_base, company_folders):
+def send_outlook_message(recipients):
+    """
+    Отправляет простое уведомление через Outlook
+    """
+    try:
+        outlook = win32.Dispatch('Outlook.Application')
+        mail = outlook.CreateItem(0)
+        
+        mail.To = recipients
+        mail.Subject = "Выгрузка данных в Диадок"
+        
+        # Только дата, время и сообщение о выгрузке
+        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        mail.Body = f"{current_time} - все выгружено"
+        
+        mail.Send()
+        print(f"✅ Уведомление отправлено: {recipients}")
+        return True
+    except Exception as e:
+        print(f"❌ Ошибка при отправке email: {e}")
+        return False
+
+def copy_contents_from_nested_folders(source_root, target_base, company_folders, email_recipients):
     """
     Копирует всё содержимое из указанных папок (company_folders),
     которые могут лежать на любом уровне вложенности внутри source_root,
     в соответствующие подпапки внутри target_base.
-    
-    Args:
-        source_root (str или Path): Путь к корневой папке, где лежат папки с компаниями.
-        target_base (str или Path): Путь к папке Y, куда всё копируем.
-        company_folders (list): Список точных названий папок компаний.
     """
     source_root = Path(source_root)
     target_base = Path(target_base)
@@ -76,11 +95,15 @@ def copy_contents_from_nested_folders(source_root, target_base, company_folders)
     
     print("-" * 50)
     print(f"Готово! Скопировано элементов: {copied_count}")
+    
+    # Отправка простого уведомления
+    if email_recipients:
+        send_outlook_message(email_recipients)
 
 if __name__ == "__main__":
     # ВАШИ ПУТИ
-    source_folder = r"\\fs-01.renlife.com\alldocs\Инвестиционный департамент\7.0 Treasury\diadoc_connector"  # Путь к папке с матрешками
-    target_folder = r"\\fs-01.renlife.com\alldocs\Финансовый департамент\Treasury\Базы данных(автоматизация)\Диадок"  # Путь к целевой папке Y
+    source_folder = r"\\fs-01.renlife.com\alldocs\Инвестиционный департамент\7.0 Treasury\diadoc_connector"
+    target_folder = r"\\fs-01.renlife.com\alldocs\Финансовый департамент\Treasury\Базы данных(автоматизация)\Диадок"
     
     # Список точных названий папок компаний
     companies = [
@@ -89,5 +112,8 @@ if __name__ == "__main__":
         "7825489723-ТКБ Инвестмент Партнерс (АО)"
     ]
     
+    # Email получателей (можно несколько через точку с запятой)
+    email_recipients = "your.email@company.com; manager@company.com"
+    
     # Запуск
-    copy_contents_from_nested_folders(source_folder, target_folder, companies)
+    copy_contents_from_nested_folders(source_folder, target_folder, companies, email_recipients)
