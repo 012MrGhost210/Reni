@@ -23,92 +23,75 @@ class ExcelParser:
         match = re.search(r'(\d{2}\.\d{2}\.\d{4})', filename)
         return match.group(1) if match else None
     
-    def extract_number_from_string(self, text):
+    def clean_number(self, value):
         """
-        Извлекает число из строки любого формата
-        Примеры: '3 451 553,68 руб.', '2662408.68', '2,662,408.68'
+        Очищает число от всего лишнего и преобразует в float
         """
-        if text is None:
+        if value is None:
             return None
         
         # Если уже число
-        if isinstance(text, (int, float)):
-            return float(text)
+        if isinstance(value, (int, float)):
+            return float(value)
         
         # Преобразуем в строку
-        text = str(text)
+        value_str = str(value).strip()
         
-        # Ищем число в формате: пробелы или запятые как разделители тысяч, запятая или точка как десятичный разделитель
-        # Паттерн находит: цифры, пробелы, запятые, точки, затем опционально руб
-        match = re.search(r'([\d\s]+[.,]?\d*)\s*руб', text, re.IGNORECASE)
-        if not match:
-            # Если нет "руб", ищем просто число
-            match = re.search(r'[\d\s]+[.,]?\d*', text)
+        # Удаляем слово "руб" и всё после него
+        if 'руб' in value_str.lower():
+            value_str = value_str.lower().split('руб')[0].strip()
         
-        if match:
-            number_str = match.group(1) if 'руб' in text.lower() else match.group(0)
-            # Убираем все пробелы
-            number_str = re.sub(r'\s', '', number_str)
-            # Заменяем запятую на точку (десятичный разделитель)
-            number_str = number_str.replace(',', '.')
-            
-            try:
-                return float(number_str)
-            except:
-                pass
+        # Удаляем все пробелы (включая неразрывные)
+        value_str = re.sub(r'\s+', '', value_str)
         
-        return None
+        # Заменяем запятую на точку (десятичный разделитель)
+        value_str = value_str.replace(',', '.')
+        
+        # Удаляем всё кроме цифр и точки
+        value_str = re.sub(r'[^\d.]', '', value_str)
+        
+        # Если несколько точек, оставляем только последнюю
+        if value_str.count('.') > 1:
+            parts = value_str.split('.')
+            value_str = ''.join(parts[:-1]) + '.' + parts[-1]
+        
+        try:
+            return float(value_str)
+        except ValueError:
+            return None
     
     def find_net_asset_value(self, sheet):
         """
-        Ищет 'Итого стоимость чистых активов' и возвращает число из столбца P (индекс 15)
+        Ищет 'Итого стоимость чистых активов' в столбце A
+        и возвращает число из столбца P (индекс 15)
         """
         search_text = "Итого стоимость чистых активов"
         target_col = 15  # P = 15
         
         for row_idx in range(sheet.nrows):
-            # Проверяем ячейку в столбце A (индекс 0) на наличие ключевой фразы
+            # Проверяем столбец A (индекс 0)
             if sheet.ncols > 0:
                 cell_value = sheet.cell(row_idx, 0).value
                 if cell_value and isinstance(cell_value, str):
                     if search_text.lower() in cell_value.lower():
-                        print(f"      ✅ Найдено ключевое слово в строке {row_idx}, столбец A")
+                        print(f"      ✅ Найдено в строке {row_idx}")
                         
-                        # Берем значение из столбца P (индекс 15)
+                        # Берем значение из столбца P
                         if target_col < sheet.ncols:
-                            value_cell = sheet.cell(row_idx, target_col)
-                            value = value_cell.value
-                            print(f"      📍 Значение в столбце P: '{value}'")
+                            raw_value = sheet.cell(row_idx, target_col).value
+                            print(f"      📍 Сырое значение в P: '{raw_value}'")
                             
-                            # Извлекаем число
-                            parsed_value = self.extract_number_from_string(value)
-                            if parsed_value is not None:
-                                print(f"      ✅ Извлечено число: {parsed_value}")
-                                return parsed_value
+                            # Очищаем и преобразуем
+                            number = self.clean_number(raw_value)
+                            if number is not None:
+                                print(f"      ✅ Преобразовано в число: {number}")
+                                return number
                             else:
-                                print(f"      ⚠️ Не удалось извлечь число из '{value}'")
-                                
-                                # Пробуем посмотреть другие столбцы в этой строке
-                                print(f"      🔍 Ищем число в других столбцах строки {row_idx}:")
-                                for col in range(sheet.ncols):
-                                    val = sheet.cell(row_idx, col).value
-                                    num = self.extract_number_from_string(val)
-                                    if num is not None:
-                                        col_letter = self.get_column_letter(col)
-                                        print(f"         Найдено число в столбце {col_letter}: {num}")
-                                        return num
+                                print(f"      ❌ Не удалось преобразовать: '{raw_value}'")
                         else:
-                            print(f"      ⚠️ Столбца P (индекс 15) нет в файле!")
+                            print(f"      ❌ Столбца P нет в файле")
                         return None
         return None
-    
-    def get_column_letter(self, col_idx):
-        """Преобразует индекс столбца в букву"""
-        result = ""
-        while col_idx >= 0:
-            result = chr(65 + (col_idx % 26)) + result
-            col_idx = col_idx // 26 - 1
-        return result
     
     def process_file(self, file_path):
         """Обрабатывает один Excel файл"""
@@ -126,8 +109,6 @@ class ExcelParser:
             wb = xlrd.open_workbook(str(file_path), formatting_info=False)
             sheet = wb.sheet_by_index(0)
             
-            print(f"   Размер листа: {sheet.nrows} строк x {sheet.ncols} столбцов")
-            
             # Ищем значение
             found_value = self.find_net_asset_value(sheet)
             
@@ -135,12 +116,10 @@ class ExcelParser:
                 value_str = f"{found_value:,.2f}".replace(',', ' ')
                 print(f"   ✅ Найдено: {value_str} руб.")
             else:
-                print(f"   ⚠️ Значение 'Итого стоимость чистых активов' не найдено")
+                print(f"   ❌ Значение не найдено")
                 
         except Exception as e:
             print(f"   ❌ Ошибка: {e}")
-            import traceback
-            traceback.print_exc()
             found_value = None
         
         return {
@@ -152,7 +131,7 @@ class ExcelParser:
     def run(self):
         """Запускает обработку всех файлов"""
         print("="*80)
-        print("ПАРСИНГ EXCEL - ПОИСК 'ИТОГО СТОИМОСТЬ ЧИСТЫХ АКТИВОВ'")
+        print("ПАРСИНГ - СТОИМОСТЬ ЧИСТЫХ АКТИВОВ")
         print("="*80)
         print(f"📂 Папка: {self.input_folder}")
         print(f"📄 Результат: {self.output_file}")
@@ -174,7 +153,6 @@ class ExcelParser:
         for file_path in excel_files:
             result = self.process_file(file_path)
             self.results.append(result)
-            print("-"*80)
         
         # Сохраняем результаты
         self.save_results()
@@ -227,7 +205,7 @@ class ExcelParser:
         print(f"Не найдено: {total - found}")
         
         if found > 0:
-            print(f"\n💰 Общая стоимость чистых активов: {total_sum:,.2f} руб.".replace(',', ' '))
+            print(f"\n💰 Общая сумма: {total_sum:,.2f} руб.".replace(',', ' '))
             
             print("\n📋 Найденные значения:")
             print("-"*60)
@@ -255,12 +233,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
- Ищу: 'Итого стоимость чистых активов' в любом столбце
-   📍 Беру число из столбца: P (индекс 15)
-      ✅ Найдено ключевое слово в строке 155, столбец 0
-      📍 Значение в столбце 15 (P): '1 784 222,90 руб.'
-      ⚠️ Не удалось преобразовать в число: '1 784 222,90 руб.'
-   ⚠️ Ключевое слово не найдено
