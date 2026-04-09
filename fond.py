@@ -23,53 +23,39 @@ class ExcelParser:
         match = re.search(r'(\d{2}\.\d{2}\.\d{4})', filename)
         return match.group(1) if match else None
     
-    def parse_number(self, value):
+    def extract_number_from_string(self, text):
         """
-        Преобразует значение в число.
-        Работает с любыми форматами чисел и пробелами
+        Извлекает число из строки любого формата
+        Примеры: '3 451 553,68 руб.', '2662408.68', '2,662,408.68'
         """
-        if value is None:
+        if text is None:
             return None
-            
-        # Если уже число
-        if isinstance(value, (float, int)):
-            return float(value)
         
-        # Если строка
-        if isinstance(value, str):
-            # Выводим raw значение для отладки
-            print(f"      Отладка: raw значение = '{repr(value)}'")
-            
-            # Убираем все виды пробелов (включая неразрывные)
-            import unicodedata
-            # Нормализуем строку и заменяем все пробельные символы на обычный пробел
-            cleaned = unicodedata.normalize('NFKC', value)
-            # Убираем слово "руб" и всё что после него
-            cleaned = re.sub(r'руб.*$', '', cleaned, flags=re.IGNORECASE)
-            # Убираем все пробельные символы (включая неразрывные)
-            cleaned = re.sub(r'\s+', '', cleaned)
+        # Если уже число
+        if isinstance(text, (int, float)):
+            return float(text)
+        
+        # Преобразуем в строку
+        text = str(text)
+        
+        # Ищем число в формате: пробелы или запятые как разделители тысяч, запятая или точка как десятичный разделитель
+        # Паттерн находит: цифры, пробелы, запятые, точки, затем опционально руб
+        match = re.search(r'([\d\s]+[.,]?\d*)\s*руб', text, re.IGNORECASE)
+        if not match:
+            # Если нет "руб", ищем просто число
+            match = re.search(r'[\d\s]+[.,]?\d*', text)
+        
+        if match:
+            number_str = match.group(1) if 'руб' in text.lower() else match.group(0)
+            # Убираем все пробелы
+            number_str = re.sub(r'\s', '', number_str)
             # Заменяем запятую на точку (десятичный разделитель)
-            cleaned = cleaned.replace(',', '.')
-            
-            print(f"      Отладка: после очистки = '{cleaned}'")
+            number_str = number_str.replace(',', '.')
             
             try:
-                result = float(cleaned)
-                print(f"      Отладка: успешно распарсили -> {result}")
-                return result
-            except ValueError as e:
-                print(f"      Отладка: ошибка парсинга - {e}")
-                # Пробуем извлечь число регуляркой
-                match = re.search(r'[\d]+[.,]?[\d]*', cleaned)
-                if match:
-                    num_str = match.group().replace(',', '.')
-                    try:
-                        result = float(num_str)
-                        print(f"      Отладка: извлекли регуляркой -> {result}")
-                        return result
-                    except:
-                        pass
-                return None
+                return float(number_str)
+            except:
+                pass
         
         return None
     
@@ -81,29 +67,48 @@ class ExcelParser:
         target_col = 15  # P = 15
         
         for row_idx in range(sheet.nrows):
-            for col_idx in range(sheet.ncols):
-                cell_value = sheet.cell(row_idx, col_idx).value
+            # Проверяем ячейку в столбце A (индекс 0) на наличие ключевой фразы
+            if sheet.ncols > 0:
+                cell_value = sheet.cell(row_idx, 0).value
                 if cell_value and isinstance(cell_value, str):
                     if search_text.lower() in cell_value.lower():
-                        print(f"      ✅ Найдено ключевое слово в строке {row_idx}, столбец {col_idx}")
+                        print(f"      ✅ Найдено ключевое слово в строке {row_idx}, столбец A")
                         
                         # Берем значение из столбца P (индекс 15)
                         if target_col < sheet.ncols:
                             value_cell = sheet.cell(row_idx, target_col)
                             value = value_cell.value
-                            print(f"      📍 Значение в столбце P (индекс 15): '{value}'")
-                            print(f"      📍 Тип значения: {type(value)}")
+                            print(f"      📍 Значение в столбце P: '{value}'")
                             
-                            parsed_value = self.parse_number(value)
+                            # Извлекаем число
+                            parsed_value = self.extract_number_from_string(value)
                             if parsed_value is not None:
-                                print(f"      ✅ Распарсили в число: {parsed_value}")
+                                print(f"      ✅ Извлечено число: {parsed_value}")
                                 return parsed_value
                             else:
-                                print(f"      ⚠️ Не удалось распарсить: '{value}'")
+                                print(f"      ⚠️ Не удалось извлечь число из '{value}'")
+                                
+                                # Пробуем посмотреть другие столбцы в этой строке
+                                print(f"      🔍 Ищем число в других столбцах строки {row_idx}:")
+                                for col in range(sheet.ncols):
+                                    val = sheet.cell(row_idx, col).value
+                                    num = self.extract_number_from_string(val)
+                                    if num is not None:
+                                        col_letter = self.get_column_letter(col)
+                                        print(f"         Найдено число в столбце {col_letter}: {num}")
+                                        return num
                         else:
                             print(f"      ⚠️ Столбца P (индекс 15) нет в файле!")
                         return None
         return None
+    
+    def get_column_letter(self, col_idx):
+        """Преобразует индекс столбца в букву"""
+        result = ""
+        while col_idx >= 0:
+            result = chr(65 + (col_idx % 26)) + result
+            col_idx = col_idx // 26 - 1
+        return result
     
     def process_file(self, file_path):
         """Обрабатывает один Excel файл"""
@@ -121,6 +126,8 @@ class ExcelParser:
             wb = xlrd.open_workbook(str(file_path), formatting_info=False)
             sheet = wb.sheet_by_index(0)
             
+            print(f"   Размер листа: {sheet.nrows} строк x {sheet.ncols} столбцов")
+            
             # Ищем значение
             found_value = self.find_net_asset_value(sheet)
             
@@ -128,7 +135,7 @@ class ExcelParser:
                 value_str = f"{found_value:,.2f}".replace(',', ' ')
                 print(f"   ✅ Найдено: {value_str} руб.")
             else:
-                print(f"   ⚠️ Значение не найдено")
+                print(f"   ⚠️ Значение 'Итого стоимость чистых активов' не найдено")
                 
         except Exception as e:
             print(f"   ❌ Ошибка: {e}")
@@ -167,6 +174,7 @@ class ExcelParser:
         for file_path in excel_files:
             result = self.process_file(file_path)
             self.results.append(result)
+            print("-"*80)
         
         # Сохраняем результаты
         self.save_results()
