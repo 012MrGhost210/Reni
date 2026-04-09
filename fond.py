@@ -48,10 +48,10 @@ class ExcelParser:
     
     def find_net_asset_value(self, sheet):
         """
-        Ищет в столбце A (индекс 0) строку с 'Итого чистых активов'
+        Ищет в столбце A (индекс 0) строку с 'Итого стоимость чистых активов'
         и возвращает число из столбца P (индекс 15) в той же строке
         """
-        search_phrases = ["итого чистых активов", "чистых активов", "net assets"]
+        search_phrase = "итого стоимость чистых активов"
         target_col = 15  # P = 15 (A=0, B=1, ..., P=15)
         
         for row_idx in range(sheet.nrows):
@@ -60,7 +60,7 @@ class ExcelParser:
                 cell_value = str(sheet.cell(row_idx, 0).value).lower().strip()
                 
                 # Проверяем, содержит ли ячейка искомую фразу
-                if any(phrase in cell_value for phrase in search_phrases):
+                if search_phrase in cell_value:
                     # Берем значение из столбца P (индекс 15)
                     if target_col < sheet.ncols:
                         value_cell = sheet.cell(row_idx, target_col)
@@ -90,14 +90,14 @@ class ExcelParser:
             wb = xlrd.open_workbook(str(file_path), formatting_info=False)
             sheet = wb.sheet_by_index(0)
             
-            # Ищем значение "Итого чистых активов" в столбце A, число в столбце P
+            # Ищем значение "Итого стоимость чистых активов" в столбце A, число в столбце P
             found_value = self.find_net_asset_value(sheet)
             
             if found_value is not None:
                 value_str = f"{found_value:,.2f}".replace(',', ' ')
                 print(f"   ✅ Найдено: {value_str} руб.")
             else:
-                print(f"   ⚠️ Значение 'Итого чистых активов' не найдено")
+                print(f"   ⚠️ Фраза 'Итого стоимость чистых активов' не найдена")
                 
         except Exception as e:
             print(f"   ❌ Ошибка: {e}")
@@ -112,7 +112,7 @@ class ExcelParser:
     def run(self):
         """Запускает обработку всех файлов"""
         print("="*80)
-        print("ПАРСИНГ EXCEL ФАЙЛОВ - ПОИСК 'ИТОГО ЧИСТЫХ АКТИВОВ'")
+        print("ПАРСИНГ EXCEL ФАЙЛОВ - ПОИСК 'ИТОГО СТОИМОСТЬ ЧИСТЫХ АКТИВОВ'")
         print("="*80)
         print(f"📂 Папка: {self.input_folder}")
         print(f"📄 Результат: {self.output_file}")
@@ -144,7 +144,7 @@ class ExcelParser:
         try:
             with open(self.output_file, 'w', encoding='utf-8-sig', newline='') as f:
                 writer = csv.writer(f)
-                writer.writerow(['Дата', 'Значение (руб.)', 'Файл'])
+                writer.writerow(['Дата', 'Стоимость чистых активов (руб.)', 'Файл'])
                 
                 # Сортируем по дате
                 sorted_results = sorted(self.results, 
@@ -186,7 +186,7 @@ class ExcelParser:
         print(f"Не найдено: {total - found}")
         
         if found > 0:
-            print(f"\n💰 Общая сумма чистых активов: {total_sum:,.2f} руб.".replace(',', ' '))
+            print(f"\n💰 Общая стоимость чистых активов: {total_sum:,.2f} руб.".replace(',', ' '))
             
             print("\n📋 Найденные значения:")
             print("-"*60)
@@ -205,7 +205,7 @@ def main():
     input_folder = r"\\fs-01.renlife.com\alldocs\Инвестиционный департамент\7.0 Treasury\Фонд СЧА"
     
     # Файл с результатами
-    output_file = Path(input_folder) / f"!_РЕЗУЛЬТАТЫ_ЧИСТЫЕ_АКТИВЫ.csv"
+    output_file = Path(input_folder) / f"!_РЕЗУЛЬТАТЫ_СТОИМОСТЬ_ЧИСТЫХ_АКТИВОВ.csv"
     
     # Создаем парсер и запускаем
     parser = ExcelParser(input_folder, output_file)
