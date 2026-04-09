@@ -6,25 +6,24 @@ def clean_number(value):
     if value is None:
         return None
     
-    # Если уже число
     if isinstance(value, (int, float)):
         return float(value)
     
-    # Преобразуем в строку
     value_str = str(value).strip()
+    print(f"  raw: '{value_str}'")  # Отладка
     
-    # Удаляем всё после "руб"
     if 'руб' in value_str.lower():
         value_str = value_str.lower().split('руб')[0].strip()
+        print(f"  после удаления руб: '{value_str}'")
     
-    # Удаляем все пробелы
     value_str = value_str.replace(' ', '')
+    print(f"  после удаления пробелов: '{value_str}'")
     
-    # Заменяем запятую на точку
     value_str = value_str.replace(',', '.')
+    print(f"  после замены запятой: '{value_str}'")
     
-    # Удаляем всё кроме цифр и точки
     value_str = re.sub(r'[^\d.]', '', value_str)
+    print(f"  после очистки: '{value_str}'")
     
     try:
         return float(value_str)
@@ -50,14 +49,9 @@ for row_idx in range(sheet.nrows):
             # Берем значение из столбца P (индекс 15)
             raw_value = sheet.cell(row_idx, 15).value
             print(f"Значение в P: '{raw_value}'")
+            print(f"Тип значения: {type(raw_value)}")
             
             # Преобразуем в число
             number = clean_number(raw_value)
-            print(f"Число: {number}")
+            print(f"Результат: {number}")
             break
-   🔍 Ищу: 'Итого стоимость чистых активов' в любом столбце
-   📍 Беру число из столбца: P (индекс 15)
-      ✅ Найдено ключевое слово в строке 155, столбец 0
-      📍 Значение в столбце 15 (P): '628 487,91 руб.'
-      ⚠️ Не удалось преобразовать в число: '628 487,91 руб.'
-   ⚠️ Ключевое слово не найдено
