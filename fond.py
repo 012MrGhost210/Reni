@@ -23,58 +23,83 @@ class ExcelParser:
         match = re.search(r'(\d{2}\.\d{2}\.\d{4})', filename)
         return match.group(1) if match else None
     
-    def parse_number_from_string(self, value):
+    def debug_search(self, sheet):
         """
-        Преобразует строку типа '131 231 руб.' или '131231' в число
+        Отладочная функция: выводит ВСЕ ячейки, которые содержат слово "чистых" или "активов"
         """
-        # Если уже число
+        print("\n   🔍 ОТЛАДКА: Поиск ключевых слов в файле...")
+        print("   " + "-"*60)
+        
+        found_count = 0
+        for row_idx in range(sheet.nrows):
+            for col_idx in range(sheet.ncols):
+                cell_value = sheet.cell(row_idx, col_idx).value
+                if cell_value and isinstance(cell_value, str):
+                    cell_lower = cell_value.lower()
+                    # Ищем разные варианты ключевых слов
+                    if any(word in cell_lower for word in ['чистых', 'активов', 'итого', 'газпромбанк']):
+                        found_count += 1
+                        print(f"   Строка {row_idx}, столбец {col_idx} ({self.get_column_letter(col_idx)}):")
+                        print(f"      Значение: '{cell_value}'")
+                        
+                        # Показываем соседние ячейки (5 столбцов вправо)
+                        print(f"      Соседние ячейки справа:")
+                        for offset in range(1, 6):
+                            if col_idx + offset < sheet.ncols:
+                                neighbor = sheet.cell(row_idx, col_idx + offset).value
+                                if neighbor:
+                                    print(f"         +{offset}: '{neighbor}'")
+                        print()
+        
+        if found_count == 0:
+            print("   ⚠️ Ни одного ключевого слова не найдено!")
+            print("   Проверьте, что файл не пустой и содержит текст")
+        
+        print("   " + "-"*60)
+        return found_count
+    
+    def get_column_letter(self, col_idx):
+        """Преобразует индекс столбца в букву (0=A, 1=B, etc.)"""
+        result = ""
+        while col_idx >= 0:
+            result = chr(65 + (col_idx % 26)) + result
+            col_idx = col_idx // 26 - 1
+        return result
+    
+    def find_value_by_keyword(self, sheet, search_text, target_col):
+        """
+        Поиск значения по ключевому слову
+        """
+        for row_idx in range(sheet.nrows):
+            for col_idx in range(sheet.ncols):
+                cell_value = sheet.cell(row_idx, col_idx).value
+                if cell_value and isinstance(cell_value, str):
+                    if search_text.lower() in cell_value.lower():
+                        print(f"      ✅ Найдено ключевое слово в строке {row_idx}, столбец {col_idx}")
+                        
+                        # Берем значение из целевого столбца
+                        if target_col < sheet.ncols:
+                            value_cell = sheet.cell(row_idx, target_col)
+                            print(f"      📍 Значение в столбце {target_col} ({self.get_column_letter(target_col)}): '{value_cell.value}'")
+                            return self.parse_number(value_cell.value)
+                        else:
+                            print(f"      ⚠️ Столбец {target_col} не существует!")
+                            return None
+        return None
+    
+    def parse_number(self, value):
+        """Преобразует значение в число"""
         if isinstance(value, (float, int)):
             return float(value)
         
-        # Если строка
         if isinstance(value, str):
-            # Удаляем 'руб.', 'руб', 'р.' и пробелы
-            cleaned = value.replace('руб', '').replace('р.', '').strip()
-            cleaned = cleaned.replace(' ', '')  # убираем пробелы тысяч
-            cleaned = cleaned.replace(',', '.')  # заменяем запятую на точку
+            # Убираем пробелы, запятые, слово "руб"
+            cleaned = value.replace(' ', '').replace(',', '.').replace('руб', '').replace('р.', '').strip()
             try:
                 return float(cleaned)
             except:
+                print(f"      ⚠️ Не удалось преобразовать в число: '{value}'")
                 return None
-        
-        return None
-    
-    def find_value_by_keyword(self, sheet):
-        """
-        Поиск значения по ключевому слову.
-        Ключевое слово ищется в ЛЮБОМ столбце.
-        Число берется из столбца НОМЕР_СТОЛБЦА (укажите нужный)
-        """
-        # ⚠️ ЗДЕСЬ НУЖНО УКАЗАТЬ КЛЮЧЕВОЕ СЛОВО
-        search_text = "ИТОГО ЧИСТЫХ АКТИВОВ"  # ← ИЗМЕНИТЕ НА НУЖНОЕ
-        
-        # ⚠️ ЗДЕСЬ НУЖНО УКАЗАТЬ СТОЛБЕЦ С ЧИСЛОМ
-        # A=0, B=1, C=2, D=3, E=4, F=5, G=6, H=7, I=8, J=9, K=10, L=11, M=12, N=13, 
-        # O=14, P=15, Q=16, R=17, S=18, T=19, U=20, V=21, W=22, X=23, Y=24, Z=25
-        target_col = 15  # ← ИЗМЕНИТЕ НА НУЖНЫЙ СТОЛБЕЦ (15 = P)
-        
-        for row_idx in range(sheet.nrows):
-            row = sheet.row(row_idx)
-            for col_idx, cell in enumerate(row):
-                cell_value = cell.value
-                if cell_value and search_text.lower() in str(cell_value).lower():
-                    # Нашли ключевое слово, берем значение из целевого столбца
-                    if target_col < sheet.ncols:
-                        value_cell = sheet.cell(row_idx, target_col)
-                        value = self.parse_number_from_string(value_cell.value)
-                        if value is not None:
-                            return value
-                        else:
-                            # Если не число, выводим для отладки
-                            print(f"      Отладка: значение в столбце {target_col} = '{value_cell.value}'")
-                    else:
-                        print(f"      ⚠️ Столбец {target_col} не существует (всего столбцов: {sheet.ncols})")
-                    return None
         return None
     
     def process_file(self, file_path):
@@ -93,8 +118,20 @@ class ExcelParser:
             wb = xlrd.open_workbook(str(file_path), formatting_info=False)
             sheet = wb.sheet_by_index(0)
             
-            # Ищем значение по ключевому слову
-            found_value = self.find_value_by_keyword(sheet)
+            print(f"   Размер листа: {sheet.nrows} строк x {sheet.ncols} столбцов")
+            
+            # 🔍 ОТЛАДКА: показываем все ключевые слова в файле
+            self.debug_search(sheet)
+            
+            # ⚠️ ЗДЕСЬ НУЖНО УКАЗАТЬ КЛЮЧЕВОЕ СЛОВО И СТОЛБЕЦ
+            search_text = "Итого стоимость чистых активов"  # ← ИЗМЕНИТЕ ЗДЕСЬ
+            target_col = 14  # ← ИЗМЕНИТЕ ЗДЕСЬ (14 = O, 15 = P, 23 = X)
+            
+            print(f"\n   🔍 Ищу: '{search_text}' в любом столбце")
+            print(f"   📍 Беру число из столбца: {self.get_column_letter(target_col)} (индекс {target_col})")
+            
+            # Ищем значение
+            found_value = self.find_value_by_keyword(sheet, search_text, target_col)
             
             if found_value is not None:
                 value_str = f"{found_value:,.2f}".replace(',', ' ')
@@ -104,6 +141,8 @@ class ExcelParser:
                 
         except Exception as e:
             print(f"   ❌ Ошибка: {e}")
+            import traceback
+            traceback.print_exc()
             found_value = None
         
         return {
@@ -115,10 +154,9 @@ class ExcelParser:
     def run(self):
         """Запускает обработку всех файлов"""
         print("="*80)
-        print("ПАРСИНГ EXCEL ФАЙЛОВ - ПОИСК ПО КЛЮЧЕВОМУ СЛОВУ")
+        print("ОТЛАДОЧНЫЙ ПАРСИНГ - ПОИСК КЛЮЧЕВЫХ СЛОВ")
         print("="*80)
         print(f"📂 Папка: {self.input_folder}")
-        print(f"📄 Результат: {self.output_file}")
         print("="*80)
         
         # Получаем все .xls файлы
@@ -131,89 +169,21 @@ class ExcelParser:
             print("\n❌ Нет .xls файлов!")
             return
         
-        print("\n" + "-"*80)
-        
-        # Обрабатываем каждый файл
+        # Обрабатываем КАЖДЫЙ файл
         for file_path in excel_files:
-            result = self.process_file(file_path)
-            self.results.append(result)
+            self.process_file(file_path)
+            print("\n" + "="*80)
+            input("Нажмите Enter для продолжения к следующему файлу...")
         
-        # Сохраняем результаты
-        self.save_results()
-        self.print_summary()
-    
-    def save_results(self):
-        """Сохраняет результаты в CSV"""
-        try:
-            with open(self.output_file, 'w', encoding='utf-8-sig', newline='') as f:
-                writer = csv.writer(f)
-                writer.writerow(['Дата', 'Значение (руб.)', 'Файл'])
-                
-                # Сортируем по дате
-                sorted_results = sorted(self.results, 
-                                      key=lambda x: x['Дата'] if x['Дата'] != 'Не найдена' else '')
-                
-                total_sum = 0
-                for row in sorted_results:
-                    if row['Значение'] is not None:
-                        total_sum += row['Значение']
-                        writer.writerow([
-                            row['Дата'],
-                            f"{row['Значение']:.2f}".replace('.', ','),
-                            row['Файл']
-                        ])
-                    else:
-                        writer.writerow([row['Дата'], 'НЕ НАЙДЕНО', row['Файл']])
-                
-                # Добавляем итоговую строку
-                writer.writerow([])
-                writer.writerow(['ИТОГО:', f"{total_sum:.2f}".replace('.', ','), ''])
-                    
-            print(f"\n✅ Результаты сохранены в: {self.output_file}")
-            
-        except Exception as e:
-            print(f"\n❌ Ошибка при сохранении: {e}")
-    
-    def print_summary(self):
-        """Выводит статистику"""
-        print("\n" + "="*80)
-        print("📊 ИТОГИ:")
-        print("="*80)
-        
-        total = len(self.results)
-        found = sum(1 for r in self.results if r['Значение'] is not None)
-        total_sum = sum(r['Значение'] for r in self.results if r['Значение'] is not None)
-        
-        print(f"Всего файлов: {total}")
-        print(f"Найдено значений: {found}")
-        print(f"Не найдено: {total - found}")
-        
-        if found > 0:
-            print(f"\n💰 Общая сумма: {total_sum:,.2f} руб.".replace(',', ' '))
-            
-            print("\n📋 Найденные значения:")
-            print("-"*60)
-            print(f"{'№':<4} {'Дата':<15} {'Значение':>20}") 
-            print("-"*60)
-            
-            sorted_results = sorted([r for r in self.results if r['Значение'] is not None],
-                                  key=lambda x: x['Дата'])
-            
-            for i, row in enumerate(sorted_results, 1):
-                value_str = f"{row['Значение']:,.2f}".replace(',', ' ')
-                print(f"{i:<4} {row['Дата']:<15} {value_str:>20}")
+        print("\n✅ Отладка завершена")
 
 def main():
     # Путь к папке с файлами
     input_folder = r"\\fs-01.renlife.com\alldocs\Инвестиционный департамент\7.0 Treasury\Фонд СЧА"
     
-    # Файл с результатами
-    output_file = Path(input_folder) / f"!_РЕЗУЛЬТАТЫ_НОВЫЙ.csv"
-    
     # Создаем парсер и запускаем
-    parser = ExcelParser(input_folder, output_file)
+    parser = ExcelParser(input_folder, "")
     parser.run()
-    
 
 if __name__ == "__main__":
     main()
