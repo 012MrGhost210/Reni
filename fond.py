@@ -23,34 +23,55 @@ class ExcelParser:
         match = re.search(r'(\d{2}\.\d{2}\.\d{4})', filename)
         return match.group(1) if match else None
     
-    def find_gazprombank_value(self, sheet):
+    def parse_number_from_string(self, value_str):
         """
-        Поиск значения для ГАЗПРОМБАНКА в колонке X (индекс 23)
+        Преобразует строку типа '3 123 345 руб.' или '3123345' в число
         """
-        search_text = "ГАЗПРОМБАНК"
+        if value_str is None:
+            return None
+            
+        if isinstance(value_str, (int, float)):
+            return float(value_str)
+        
+        if not isinstance(value_str, str):
+            return None
+        
+        # Удаляем 'руб.', 'руб', 'р.' и пробелы-разделители тысяч
+        cleaned = value_str.replace('руб', '').replace('р.', '').strip()
+        cleaned = cleaned.replace(' ', '')  # убираем пробелы тысяч
+        cleaned = cleaned.replace(',', '.')  # заменяем запятую на точку (если есть)
+        
+        try:
+            return float(cleaned)
+        except ValueError:
+            return None
+    
+    def find_net_asset_value(self, sheet):
+        """
+        Ищет в столбце A (индекс 0) строку с 'Итого чистых активов'
+        и возвращает число из столбца P (индекс 15) в той же строке
+        """
+        search_phrases = ["итого чистых активов", "чистых активов", "net assets"]
+        target_col = 15  # P = 15 (A=0, B=1, ..., P=15)
         
         for row_idx in range(sheet.nrows):
-            row = sheet.row(row_idx)
-            for col_idx, cell in enumerate(row):
-                cell_value = cell.value
-                if cell_value and search_text in str(cell_value):
-                    # Значение находится в колонке X (индекс 23)
-                    target_col = 23  # X = 23 (A=0, B=1, ..., X=23)
-                    
+            # Проверяем ячейку в столбце A (индекс 0)
+            if sheet.ncols > 0:
+                cell_value = str(sheet.cell(row_idx, 0).value).lower().strip()
+                
+                # Проверяем, содержит ли ячейка искомую фразу
+                if any(phrase in cell_value for phrase in search_phrases):
+                    # Берем значение из столбца P (индекс 15)
                     if target_col < sheet.ncols:
                         value_cell = sheet.cell(row_idx, target_col)
-                        value = value_cell.value
+                        parsed_value = self.parse_number_from_string(value_cell.value)
                         
-                        # Проверяем что это число
-                        if isinstance(value, (float, int)):
-                            return value
-                        elif isinstance(value, str):
-                            # Пробуем преобразовать строку в число
-                            value = value.replace(' ', '').replace(',', '.')
-                            try:
-                                return float(value)
-                            except:
-                                return None
+                        if parsed_value is not None:
+                            return parsed_value
+                        else:
+                            # Если не удалось распарсить, выводим отладочную информацию
+                            print(f"      Отладка: найдено в строке {row_idx}, значение в P: '{value_cell.value}'")
+        
         return None
     
     def process_file(self, file_path):
@@ -69,14 +90,14 @@ class ExcelParser:
             wb = xlrd.open_workbook(str(file_path), formatting_info=False)
             sheet = wb.sheet_by_index(0)
             
-            # Ищем значение
-            found_value = self.find_gazprombank_value(sheet)
+            # Ищем значение "Итого чистых активов" в столбце A, число в столбце P
+            found_value = self.find_net_asset_value(sheet)
             
             if found_value is not None:
                 value_str = f"{found_value:,.2f}".replace(',', ' ')
                 print(f"   ✅ Найдено: {value_str} руб.")
             else:
-                print(f"   ⚠️ Значение не найдено")
+                print(f"   ⚠️ Значение 'Итого чистых активов' не найдено")
                 
         except Exception as e:
             print(f"   ❌ Ошибка: {e}")
@@ -91,7 +112,7 @@ class ExcelParser:
     def run(self):
         """Запускает обработку всех файлов"""
         print("="*80)
-        print("ПАРСИНГ EXCEL ФАЙЛОВ СЧА Фонд_ПДС")
+        print("ПАРСИНГ EXCEL ФАЙЛОВ - ПОИСК 'ИТОГО ЧИСТЫХ АКТИВОВ'")
         print("="*80)
         print(f"📂 Папка: {self.input_folder}")
         print(f"📄 Результат: {self.output_file}")
@@ -165,7 +186,7 @@ class ExcelParser:
         print(f"Не найдено: {total - found}")
         
         if found > 0:
-            print(f"\n💰 Общая сумма: {total_sum:,.2f} руб.".replace(',', ' '))
+            print(f"\n💰 Общая сумма чистых активов: {total_sum:,.2f} руб.".replace(',', ' '))
             
             print("\n📋 Найденные значения:")
             print("-"*60)
@@ -184,7 +205,7 @@ def main():
     input_folder = r"\\fs-01.renlife.com\alldocs\Инвестиционный департамент\7.0 Treasury\Фонд СЧА"
     
     # Файл с результатами
-    output_file = Path(input_folder) / f"!_РЕЗУЛЬТАТЫ.csv"
+    output_file = Path(input_folder) / f"!_РЕЗУЛЬТАТЫ_ЧИСТЫЕ_АКТИВЫ.csv"
     
     # Создаем парсер и запускаем
     parser = ExcelParser(input_folder, output_file)
