@@ -23,59 +23,58 @@ class ExcelParser:
         match = re.search(r'(\d{2}\.\d{2}\.\d{4})', filename)
         return match.group(1) if match else None
     
-    def parse_number_from_string(self, value_str):
+    def parse_number_from_string(self, value):
         """
-        Преобразует строку типа '3 123 345 руб.' или '3123345' в число
+        Преобразует строку типа '131 231 руб.' или '131231' в число
         """
-        if value_str is None:
-            return None
-            
-        if isinstance(value_str, (int, float)):
-            return float(value_str)
+        # Если уже число
+        if isinstance(value, (float, int)):
+            return float(value)
         
-        if not isinstance(value_str, str):
-            return None
+        # Если строка
+        if isinstance(value, str):
+            # Удаляем 'руб.', 'руб', 'р.' и пробелы
+            cleaned = value.replace('руб', '').replace('р.', '').strip()
+            cleaned = cleaned.replace(' ', '')  # убираем пробелы тысяч
+            cleaned = cleaned.replace(',', '.')  # заменяем запятую на точку
+            try:
+                return float(cleaned)
+            except:
+                return None
         
-        # Удаляем 'руб.', 'руб', 'р.' и пробелы-разделители тысяч
-        cleaned = value_str.replace('руб', '').replace('р.', '').strip()
-        cleaned = cleaned.replace(' ', '')  # убираем пробелы тысяч
-        cleaned = cleaned.replace(',', '.')  # заменяем запятую на точку (если есть)
-        
-        try:
-            return float(cleaned)
-        except ValueError:
-            return None
+        return None
     
-    def find_net_asset_value(self, sheet):
+    def find_value_by_keyword(self, sheet):
         """
-        Ищет в столбце A (индекс 0) строку с 'Итого стоимость чистых активов'
-        и возвращает число из столбца O (индекс 14) в той же строке
+        Поиск значения по ключевому слову.
+        Ключевое слово ищется в ЛЮБОМ столбце.
+        Число берется из столбца НОМЕР_СТОЛБЦА (укажите нужный)
         """
-        search_phrase = "итого стоимость чистых активов"
-        target_col = 14  # O = 14 (A=0, B=1, ..., O=14)
+        # ⚠️ ЗДЕСЬ НУЖНО УКАЗАТЬ КЛЮЧЕВОЕ СЛОВО
+        search_text = "ИТОГО ЧИСТЫХ АКТИВОВ"  # ← ИЗМЕНИТЕ НА НУЖНОЕ
+        
+        # ⚠️ ЗДЕСЬ НУЖНО УКАЗАТЬ СТОЛБЕЦ С ЧИСЛОМ
+        # A=0, B=1, C=2, D=3, E=4, F=5, G=6, H=7, I=8, J=9, K=10, L=11, M=12, N=13, 
+        # O=14, P=15, Q=16, R=17, S=18, T=19, U=20, V=21, W=22, X=23, Y=24, Z=25
+        target_col = 15  # ← ИЗМЕНИТЕ НА НУЖНЫЙ СТОЛБЕЦ (15 = P)
         
         for row_idx in range(sheet.nrows):
-            # Проверяем ячейку в столбце A (индекс 0)
-            if sheet.ncols > 0:
-                cell_value = str(sheet.cell(row_idx, 0).value).lower().strip()
-                
-                # Проверяем, содержит ли ячейка искомую фразу
-                if search_phrase in cell_value:
-                    print(f"      Отладка: найдена фраза в строке {row_idx}")
-                    
-                    # Берем значение из столбца O (индекс 14)
+            row = sheet.row(row_idx)
+            for col_idx, cell in enumerate(row):
+                cell_value = cell.value
+                if cell_value and search_text.lower() in str(cell_value).lower():
+                    # Нашли ключевое слово, берем значение из целевого столбца
                     if target_col < sheet.ncols:
                         value_cell = sheet.cell(row_idx, target_col)
-                        print(f"      Отладка: значение в O: '{value_cell.value}'")
-                        parsed_value = self.parse_number_from_string(value_cell.value)
-                        
-                        if parsed_value is not None:
-                            return parsed_value
+                        value = self.parse_number_from_string(value_cell.value)
+                        if value is not None:
+                            return value
                         else:
-                            print(f"      Отладка: не удалось распарсить число")
+                            # Если не число, выводим для отладки
+                            print(f"      Отладка: значение в столбце {target_col} = '{value_cell.value}'")
                     else:
-                        print(f"      Отладка: столбца O нет в файле (всего столбцов: {sheet.ncols})")
-        
+                        print(f"      ⚠️ Столбец {target_col} не существует (всего столбцов: {sheet.ncols})")
+                    return None
         return None
     
     def process_file(self, file_path):
@@ -92,25 +91,16 @@ class ExcelParser:
         try:
             # Открываем .xls файл
             wb = xlrd.open_workbook(str(file_path), formatting_info=False)
-            
-            # Показываем все листы для отладки
-            print(f"   Найдено листов: {wb.nsheets}")
-            for sheet_idx in range(wb.nsheets):
-                sheet_name = wb.sheet_by_index(sheet_idx).name
-                print(f"      Лист {sheet_idx}: {sheet_name}")
-            
-            # Берем первый лист (индекс 0) - MarketAssetValueCalculationPr
             sheet = wb.sheet_by_index(0)
-            print(f"   Обрабатываю лист: {sheet.name}")
             
-            # Ищем значение "Итого стоимость чистых активов" в столбце A, число в столбце O
-            found_value = self.find_net_asset_value(sheet)
+            # Ищем значение по ключевому слову
+            found_value = self.find_value_by_keyword(sheet)
             
             if found_value is not None:
                 value_str = f"{found_value:,.2f}".replace(',', ' ')
                 print(f"   ✅ Найдено: {value_str} руб.")
             else:
-                print(f"   ⚠️ Фраза 'Итого стоимость чистых активов' не найдена")
+                print(f"   ⚠️ Ключевое слово не найдено")
                 
         except Exception as e:
             print(f"   ❌ Ошибка: {e}")
@@ -125,7 +115,7 @@ class ExcelParser:
     def run(self):
         """Запускает обработку всех файлов"""
         print("="*80)
-        print("ПАРСИНГ EXCEL ФАЙЛОВ - ПОИСК 'ИТОГО СТОИМОСТЬ ЧИСТЫХ АКТИВОВ'")
+        print("ПАРСИНГ EXCEL ФАЙЛОВ - ПОИСК ПО КЛЮЧЕВОМУ СЛОВУ")
         print("="*80)
         print(f"📂 Папка: {self.input_folder}")
         print(f"📄 Результат: {self.output_file}")
@@ -157,7 +147,7 @@ class ExcelParser:
         try:
             with open(self.output_file, 'w', encoding='utf-8-sig', newline='') as f:
                 writer = csv.writer(f)
-                writer.writerow(['Дата', 'Стоимость чистых активов (руб.)', 'Файл'])
+                writer.writerow(['Дата', 'Значение (руб.)', 'Файл'])
                 
                 # Сортируем по дате
                 sorted_results = sorted(self.results, 
@@ -199,7 +189,7 @@ class ExcelParser:
         print(f"Не найдено: {total - found}")
         
         if found > 0:
-            print(f"\n💰 Общая стоимость чистых активов: {total_sum:,.2f} руб.".replace(',', ' '))
+            print(f"\n💰 Общая сумма: {total_sum:,.2f} руб.".replace(',', ' '))
             
             print("\n📋 Найденные значения:")
             print("-"*60)
@@ -218,7 +208,7 @@ def main():
     input_folder = r"\\fs-01.renlife.com\alldocs\Инвестиционный департамент\7.0 Treasury\Фонд СЧА"
     
     # Файл с результатами
-    output_file = Path(input_folder) / f"!_РЕЗУЛЬТАТЫ_СТОИМОСТЬ_ЧИСТЫХ_АКТИВОВ.csv"
+    output_file = Path(input_folder) / f"!_РЕЗУЛЬТАТЫ_НОВЫЙ.csv"
     
     # Создаем парсер и запускаем
     parser = ExcelParser(input_folder, output_file)
