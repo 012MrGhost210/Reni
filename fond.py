@@ -26,11 +26,7 @@ class ExcelParser:
     def parse_number(self, value):
         """
         Преобразует значение в число.
-        Работает с форматами:
-        - 2662408.68
-        - 2 662 408,68 руб.
-        - 2,662,408.68
-        - 2662408,68
+        Работает с любыми форматами чисел и пробелами
         """
         if value is None:
             return None
@@ -41,25 +37,36 @@ class ExcelParser:
         
         # Если строка
         if isinstance(value, str):
-            # Убираем слово "руб" и пробелы по краям
-            cleaned = value.strip()
-            cleaned = cleaned.replace('руб', '').replace('р.', '').strip()
+            # Выводим raw значение для отладки
+            print(f"      Отладка: raw значение = '{repr(value)}'")
             
-            # Убираем пробелы-разделители тысяч
-            cleaned = cleaned.replace(' ', '')
-            
+            # Убираем все виды пробелов (включая неразрывные)
+            import unicodedata
+            # Нормализуем строку и заменяем все пробельные символы на обычный пробел
+            cleaned = unicodedata.normalize('NFKC', value)
+            # Убираем слово "руб" и всё что после него
+            cleaned = re.sub(r'руб.*$', '', cleaned, flags=re.IGNORECASE)
+            # Убираем все пробельные символы (включая неразрывные)
+            cleaned = re.sub(r'\s+', '', cleaned)
             # Заменяем запятую на точку (десятичный разделитель)
             cleaned = cleaned.replace(',', '.')
             
+            print(f"      Отладка: после очистки = '{cleaned}'")
+            
             try:
-                return float(cleaned)
-            except ValueError:
-                # Если не получилось, пробуем извлечь число регуляркой
-                match = re.search(r'[\d\s]+[.,]?\d*', cleaned)
+                result = float(cleaned)
+                print(f"      Отладка: успешно распарсили -> {result}")
+                return result
+            except ValueError as e:
+                print(f"      Отладка: ошибка парсинга - {e}")
+                # Пробуем извлечь число регуляркой
+                match = re.search(r'[\d]+[.,]?[\d]*', cleaned)
                 if match:
-                    num_str = match.group().replace(' ', '').replace(',', '.')
+                    num_str = match.group().replace(',', '.')
                     try:
-                        return float(num_str)
+                        result = float(num_str)
+                        print(f"      Отладка: извлекли регуляркой -> {result}")
+                        return result
                     except:
                         pass
                 return None
@@ -85,6 +92,7 @@ class ExcelParser:
                             value_cell = sheet.cell(row_idx, target_col)
                             value = value_cell.value
                             print(f"      📍 Значение в столбце P (индекс 15): '{value}'")
+                            print(f"      📍 Тип значения: {type(value)}")
                             
                             parsed_value = self.parse_number(value)
                             if parsed_value is not None:
@@ -239,12 +247,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
-   🔍 Ищу: 'Итого стоимость чистых активов' в любом столбце
-   📍 Беру число из столбца: P (индекс 15)
-      ✅ Найдено ключевое слово в строке 155, столбец 0
-      📍 Значение в столбце 15 (P): '3 451 553,68 руб.'
-      ⚠️ Не удалось преобразовать в число: '3 451 553,68 руб.'
-   ⚠️ Ключевое слово не найдено
