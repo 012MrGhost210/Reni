@@ -49,10 +49,10 @@ class ExcelParser:
     def find_net_asset_value(self, sheet):
         """
         Ищет в столбце A (индекс 0) строку с 'Итого стоимость чистых активов'
-        и возвращает число из столбца P (индекс 15) в той же строке
+        и возвращает число из столбца O (индекс 14) в той же строке
         """
         search_phrase = "итого стоимость чистых активов"
-        target_col = 15  # P = 15 (A=0, B=1, ..., P=15)
+        target_col = 14  # O = 14 (A=0, B=1, ..., O=14)
         
         for row_idx in range(sheet.nrows):
             # Проверяем ячейку в столбце A (индекс 0)
@@ -61,16 +61,20 @@ class ExcelParser:
                 
                 # Проверяем, содержит ли ячейка искомую фразу
                 if search_phrase in cell_value:
-                    # Берем значение из столбца P (индекс 15)
+                    print(f"      Отладка: найдена фраза в строке {row_idx}")
+                    
+                    # Берем значение из столбца O (индекс 14)
                     if target_col < sheet.ncols:
                         value_cell = sheet.cell(row_idx, target_col)
+                        print(f"      Отладка: значение в O: '{value_cell.value}'")
                         parsed_value = self.parse_number_from_string(value_cell.value)
                         
                         if parsed_value is not None:
                             return parsed_value
                         else:
-                            # Если не удалось распарсить, выводим отладочную информацию
-                            print(f"      Отладка: найдено в строке {row_idx}, значение в P: '{value_cell.value}'")
+                            print(f"      Отладка: не удалось распарсить число")
+                    else:
+                        print(f"      Отладка: столбца O нет в файле (всего столбцов: {sheet.ncols})")
         
         return None
     
@@ -88,9 +92,18 @@ class ExcelParser:
         try:
             # Открываем .xls файл
             wb = xlrd.open_workbook(str(file_path), formatting_info=False)
-            sheet = wb.sheet_by_index(0)
             
-            # Ищем значение "Итого стоимость чистых активов" в столбце A, число в столбце P
+            # Показываем все листы для отладки
+            print(f"   Найдено листов: {wb.nsheets}")
+            for sheet_idx in range(wb.nsheets):
+                sheet_name = wb.sheet_by_index(sheet_idx).name
+                print(f"      Лист {sheet_idx}: {sheet_name}")
+            
+            # Берем первый лист (индекс 0) - MarketAssetValueCalculationPr
+            sheet = wb.sheet_by_index(0)
+            print(f"   Обрабатываю лист: {sheet.name}")
+            
+            # Ищем значение "Итого стоимость чистых активов" в столбце A, число в столбце O
             found_value = self.find_net_asset_value(sheet)
             
             if found_value is not None:
