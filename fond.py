@@ -27,37 +27,50 @@ class ExcelParser:
         """
         Очищает число от всего лишнего и преобразует в float
         """
+        print(f"         [clean_number] Вход: '{value}' (тип: {type(value)})")
+        
         if value is None:
+            print(f"         [clean_number] None, возвращаем None")
             return None
         
         # Если уже число
         if isinstance(value, (int, float)):
+            print(f"         [clean_number] Уже число: {value}")
             return float(value)
         
         # Преобразуем в строку
         value_str = str(value).strip()
+        print(f"         [clean_number] После str(): '{value_str}'")
         
         # Удаляем слово "руб" и всё после него
         if 'руб' in value_str.lower():
             value_str = value_str.lower().split('руб')[0].strip()
+            print(f"         [clean_number] После удаления 'руб': '{value_str}'")
         
         # Удаляем все пробелы (включая неразрывные)
         value_str = re.sub(r'\s+', '', value_str)
+        print(f"         [clean_number] После удаления пробелов: '{value_str}'")
         
         # Заменяем запятую на точку (десятичный разделитель)
         value_str = value_str.replace(',', '.')
+        print(f"         [clean_number] После замены запятой: '{value_str}'")
         
         # Удаляем всё кроме цифр и точки
         value_str = re.sub(r'[^\d.]', '', value_str)
+        print(f"         [clean_number] После удаления лишних символов: '{value_str}'")
         
         # Если несколько точек, оставляем только последнюю
         if value_str.count('.') > 1:
             parts = value_str.split('.')
             value_str = ''.join(parts[:-1]) + '.' + parts[-1]
+            print(f"         [clean_number] После обработки нескольких точек: '{value_str}'")
         
         try:
-            return float(value_str)
-        except ValueError:
+            result = float(value_str)
+            print(f"         [clean_number] Успешно преобразовано в: {result}")
+            return result
+        except ValueError as e:
+            print(f"         [clean_number] Ошибка преобразования: {e}")
             return None
     
     def find_net_asset_value(self, sheet):
@@ -68,6 +81,8 @@ class ExcelParser:
         search_text = "Итого стоимость чистых активов"
         target_col = 15  # P = 15
         
+        print(f"   Поиск фразы: '{search_text}'")
+        
         for row_idx in range(sheet.nrows):
             # Проверяем столбец A (индекс 0)
             if sheet.ncols > 0:
@@ -75,11 +90,13 @@ class ExcelParser:
                 if cell_value and isinstance(cell_value, str):
                     if search_text.lower() in cell_value.lower():
                         print(f"      ✅ Найдено в строке {row_idx}")
+                        print(f"      Текст в A: '{cell_value}'")
                         
                         # Берем значение из столбца P
                         if target_col < sheet.ncols:
                             raw_value = sheet.cell(row_idx, target_col).value
-                            print(f"      📍 Сырое значение в P: '{raw_value}'")
+                            print(f"      📍 Сырое значение в P (индекс {target_col}): '{raw_value}'")
+                            print(f"      📍 Тип raw_value: {type(raw_value)}")
                             
                             # Очищаем и преобразуем
                             number = self.clean_number(raw_value)
@@ -88,10 +105,30 @@ class ExcelParser:
                                 return number
                             else:
                                 print(f"      ❌ Не удалось преобразовать: '{raw_value}'")
+                                
+                                # Пробуем посмотреть все столбцы в этой строке
+                                print(f"      🔍 Проверяем все столбцы строки {row_idx}:")
+                                for col in range(min(sheet.ncols, 30)):
+                                    val = sheet.cell(row_idx, col).value
+                                    if val and str(val).strip():
+                                        col_letter = self.get_column_letter(col)
+                                        print(f"         Столбец {col_letter} (инд.{col}): '{val}'")
+                                        num = self.clean_number(val)
+                                        if num is not None:
+                                            print(f"         🎯 Нашли число в столбце {col_letter}: {num}")
+                                            return num
                         else:
-                            print(f"      ❌ Столбца P нет в файле")
+                            print(f"      ❌ Столбца P (индекс {target_col}) нет в файле (всего столбцов: {sheet.ncols})")
                         return None
         return None
+    
+    def get_column_letter(self, col_idx):
+        """Преобразует индекс столбца в букву"""
+        result = ""
+        while col_idx >= 0:
+            result = chr(65 + (col_idx % 26)) + result
+            col_idx = col_idx // 26 - 1
+        return result
     
     def process_file(self, file_path):
         """Обрабатывает один Excel файл"""
@@ -109,6 +146,8 @@ class ExcelParser:
             wb = xlrd.open_workbook(str(file_path), formatting_info=False)
             sheet = wb.sheet_by_index(0)
             
+            print(f"   Размер листа: {sheet.nrows} строк x {sheet.ncols} столбцов")
+            
             # Ищем значение
             found_value = self.find_net_asset_value(sheet)
             
@@ -120,6 +159,8 @@ class ExcelParser:
                 
         except Exception as e:
             print(f"   ❌ Ошибка: {e}")
+            import traceback
+            traceback.print_exc()
             found_value = None
         
         return {
@@ -131,7 +172,7 @@ class ExcelParser:
     def run(self):
         """Запускает обработку всех файлов"""
         print("="*80)
-        print("ПАРСИНГ - СТОИМОСТЬ ЧИСТЫХ АКТИВОВ")
+        print("ПАРСИНГ - СТОИМОСТЬ ЧИСТЫХ АКТИВОВ (ОТЛАДКА)")
         print("="*80)
         print(f"📂 Папка: {self.input_folder}")
         print(f"📄 Результат: {self.output_file}")
@@ -153,6 +194,8 @@ class ExcelParser:
         for file_path in excel_files:
             result = self.process_file(file_path)
             self.results.append(result)
+            print("\n" + "="*80)
+            input("Нажмите Enter для продолжения...")
         
         # Сохраняем результаты
         self.save_results()
