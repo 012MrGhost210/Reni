@@ -184,14 +184,12 @@ def main():
     input_folder = r"\\fs-01.renlife.com\alldocs\Инвестиционный департамент\7.0 Treasury\Фонд СЧА"
     
     # Файл с результатами
-    output_file = Path(input_folder) / f"!_РЕЗУЛЬТАТЫ_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    output_file = Path(input_folder) / f"!_РЕЗУЛЬТАТЫ.csv"
     
     # Создаем парсер и запускаем
     parser = ExcelParser(input_folder, output_file)
     parser.run()
     
-    print("\n" + "="*80)
-    input("\nНажмите Enter для выхода...")
 
 if __name__ == "__main__":
     main()
