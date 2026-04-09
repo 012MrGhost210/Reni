@@ -23,53 +23,56 @@ class ExcelParser:
         match = re.search(r'(\d{2}\.\d{2}\.\d{4})', filename)
         return match.group(1) if match else None
     
-    def debug_search(self, sheet):
+    def parse_number(self, value):
         """
-        Отладочная функция: выводит ВСЕ ячейки, которые содержат слово "чистых" или "активов"
+        Преобразует значение в число.
+        Работает с форматами:
+        - 2662408.68
+        - 2 662 408,68 руб.
+        - 2,662,408.68
+        - 2662408,68
         """
-        print("\n   🔍 ОТЛАДКА: Поиск ключевых слов в файле...")
-        print("   " + "-"*60)
+        if value is None:
+            return None
+            
+        # Если уже число
+        if isinstance(value, (float, int)):
+            return float(value)
         
-        found_count = 0
-        for row_idx in range(sheet.nrows):
-            for col_idx in range(sheet.ncols):
-                cell_value = sheet.cell(row_idx, col_idx).value
-                if cell_value and isinstance(cell_value, str):
-                    cell_lower = cell_value.lower()
-                    # Ищем разные варианты ключевых слов
-                    if any(word in cell_lower for word in ['чистых', 'активов', 'итого', 'газпромбанк']):
-                        found_count += 1
-                        print(f"   Строка {row_idx}, столбец {col_idx} ({self.get_column_letter(col_idx)}):")
-                        print(f"      Значение: '{cell_value}'")
-                        
-                        # Показываем соседние ячейки (5 столбцов вправо)
-                        print(f"      Соседние ячейки справа:")
-                        for offset in range(1, 6):
-                            if col_idx + offset < sheet.ncols:
-                                neighbor = sheet.cell(row_idx, col_idx + offset).value
-                                if neighbor:
-                                    print(f"         +{offset}: '{neighbor}'")
-                        print()
+        # Если строка
+        if isinstance(value, str):
+            # Убираем слово "руб" и пробелы по краям
+            cleaned = value.strip()
+            cleaned = cleaned.replace('руб', '').replace('р.', '').strip()
+            
+            # Убираем пробелы-разделители тысяч
+            cleaned = cleaned.replace(' ', '')
+            
+            # Заменяем запятую на точку (десятичный разделитель)
+            cleaned = cleaned.replace(',', '.')
+            
+            try:
+                return float(cleaned)
+            except ValueError:
+                # Если не получилось, пробуем извлечь число регуляркой
+                match = re.search(r'[\d\s]+[.,]?\d*', cleaned)
+                if match:
+                    num_str = match.group().replace(' ', '').replace(',', '.')
+                    try:
+                        return float(num_str)
+                    except:
+                        pass
+                return None
         
-        if found_count == 0:
-            print("   ⚠️ Ни одного ключевого слова не найдено!")
-            print("   Проверьте, что файл не пустой и содержит текст")
-        
-        print("   " + "-"*60)
-        return found_count
+        return None
     
-    def get_column_letter(self, col_idx):
-        """Преобразует индекс столбца в букву (0=A, 1=B, etc.)"""
-        result = ""
-        while col_idx >= 0:
-            result = chr(65 + (col_idx % 26)) + result
-            col_idx = col_idx // 26 - 1
-        return result
-    
-    def find_value_by_keyword(self, sheet, search_text, target_col):
+    def find_net_asset_value(self, sheet):
         """
-        Поиск значения по ключевому слову
+        Ищет 'Итого стоимость чистых активов' и возвращает число из столбца P (индекс 15)
         """
+        search_text = "Итого стоимость чистых активов"
+        target_col = 15  # P = 15
+        
         for row_idx in range(sheet.nrows):
             for col_idx in range(sheet.ncols):
                 cell_value = sheet.cell(row_idx, col_idx).value
@@ -77,29 +80,21 @@ class ExcelParser:
                     if search_text.lower() in cell_value.lower():
                         print(f"      ✅ Найдено ключевое слово в строке {row_idx}, столбец {col_idx}")
                         
-                        # Берем значение из целевого столбца
+                        # Берем значение из столбца P (индекс 15)
                         if target_col < sheet.ncols:
                             value_cell = sheet.cell(row_idx, target_col)
-                            print(f"      📍 Значение в столбце {target_col} ({self.get_column_letter(target_col)}): '{value_cell.value}'")
-                            return self.parse_number(value_cell.value)
+                            value = value_cell.value
+                            print(f"      📍 Значение в столбце P (индекс 15): '{value}'")
+                            
+                            parsed_value = self.parse_number(value)
+                            if parsed_value is not None:
+                                print(f"      ✅ Распарсили в число: {parsed_value}")
+                                return parsed_value
+                            else:
+                                print(f"      ⚠️ Не удалось распарсить: '{value}'")
                         else:
-                            print(f"      ⚠️ Столбец {target_col} не существует!")
-                            return None
-        return None
-    
-    def parse_number(self, value):
-        """Преобразует значение в число"""
-        if isinstance(value, (float, int)):
-            return float(value)
-        
-        if isinstance(value, str):
-            # Убираем пробелы, запятые, слово "руб"
-            cleaned = value.replace(' ', '').replace(',', '.').replace('руб', '').replace('р.', '').strip()
-            try:
-                return float(cleaned)
-            except:
-                print(f"      ⚠️ Не удалось преобразовать в число: '{value}'")
-                return None
+                            print(f"      ⚠️ Столбца P (индекс 15) нет в файле!")
+                        return None
         return None
     
     def process_file(self, file_path):
@@ -118,26 +113,14 @@ class ExcelParser:
             wb = xlrd.open_workbook(str(file_path), formatting_info=False)
             sheet = wb.sheet_by_index(0)
             
-            print(f"   Размер листа: {sheet.nrows} строк x {sheet.ncols} столбцов")
-            
-            # 🔍 ОТЛАДКА: показываем все ключевые слова в файле
-            self.debug_search(sheet)
-            
-            # ⚠️ ЗДЕСЬ НУЖНО УКАЗАТЬ КЛЮЧЕВОЕ СЛОВО И СТОЛБЕЦ
-            search_text = "Итого стоимость чистых активов"  # ← ИЗМЕНИТЕ ЗДЕСЬ
-            target_col = 14  # ← ИЗМЕНИТЕ ЗДЕСЬ (14 = O, 15 = P, 23 = X)
-            
-            print(f"\n   🔍 Ищу: '{search_text}' в любом столбце")
-            print(f"   📍 Беру число из столбца: {self.get_column_letter(target_col)} (индекс {target_col})")
-            
             # Ищем значение
-            found_value = self.find_value_by_keyword(sheet, search_text, target_col)
+            found_value = self.find_net_asset_value(sheet)
             
             if found_value is not None:
                 value_str = f"{found_value:,.2f}".replace(',', ' ')
                 print(f"   ✅ Найдено: {value_str} руб.")
             else:
-                print(f"   ⚠️ Ключевое слово не найдено")
+                print(f"   ⚠️ Значение не найдено")
                 
         except Exception as e:
             print(f"   ❌ Ошибка: {e}")
@@ -154,9 +137,10 @@ class ExcelParser:
     def run(self):
         """Запускает обработку всех файлов"""
         print("="*80)
-        print("ОТЛАДОЧНЫЙ ПАРСИНГ - ПОИСК КЛЮЧЕВЫХ СЛОВ")
+        print("ПАРСИНГ EXCEL - ПОИСК 'ИТОГО СТОИМОСТЬ ЧИСТЫХ АКТИВОВ'")
         print("="*80)
         print(f"📂 Папка: {self.input_folder}")
+        print(f"📄 Результат: {self.output_file}")
         print("="*80)
         
         # Получаем все .xls файлы
@@ -169,149 +153,89 @@ class ExcelParser:
             print("\n❌ Нет .xls файлов!")
             return
         
-        # Обрабатываем КАЖДЫЙ файл
-        for file_path in excel_files:
-            self.process_file(file_path)
-            print("\n" + "="*80)
-            input("Нажмите Enter для продолжения к следующему файлу...")
+        print("\n" + "-"*80)
         
-        print("\n✅ Отладка завершена")
+        # Обрабатываем каждый файл
+        for file_path in excel_files:
+            result = self.process_file(file_path)
+            self.results.append(result)
+        
+        # Сохраняем результаты
+        self.save_results()
+        self.print_summary()
+    
+    def save_results(self):
+        """Сохраняет результаты в CSV"""
+        try:
+            with open(self.output_file, 'w', encoding='utf-8-sig', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow(['Дата', 'Стоимость чистых активов (руб.)', 'Файл'])
+                
+                # Сортируем по дате
+                sorted_results = sorted(self.results, 
+                                      key=lambda x: x['Дата'] if x['Дата'] != 'Не найдена' else '')
+                
+                total_sum = 0
+                for row in sorted_results:
+                    if row['Значение'] is not None:
+                        total_sum += row['Значение']
+                        writer.writerow([
+                            row['Дата'],
+                            f"{row['Значение']:.2f}".replace('.', ','),
+                            row['Файл']
+                        ])
+                    else:
+                        writer.writerow([row['Дата'], 'НЕ НАЙДЕНО', row['Файл']])
+                
+                # Добавляем итоговую строку
+                writer.writerow([])
+                writer.writerow(['ИТОГО:', f"{total_sum:.2f}".replace('.', ','), ''])
+                    
+            print(f"\n✅ Результаты сохранены в: {self.output_file}")
+            
+        except Exception as e:
+            print(f"\n❌ Ошибка при сохранении: {e}")
+    
+    def print_summary(self):
+        """Выводит статистику"""
+        print("\n" + "="*80)
+        print("📊 ИТОГИ:")
+        print("="*80)
+        
+        total = len(self.results)
+        found = sum(1 for r in self.results if r['Значение'] is not None)
+        total_sum = sum(r['Значение'] for r in self.results if r['Значение'] is not None)
+        
+        print(f"Всего файлов: {total}")
+        print(f"Найдено значений: {found}")
+        print(f"Не найдено: {total - found}")
+        
+        if found > 0:
+            print(f"\n💰 Общая стоимость чистых активов: {total_sum:,.2f} руб.".replace(',', ' '))
+            
+            print("\n📋 Найденные значения:")
+            print("-"*60)
+            print(f"{'№':<4} {'Дата':<15} {'Значение':>20}") 
+            print("-"*60)
+            
+            sorted_results = sorted([r for r in self.results if r['Значение'] is not None],
+                                  key=lambda x: x['Дата'])
+            
+            for i, row in enumerate(sorted_results, 1):
+                value_str = f"{row['Значение']:,.2f}".replace(',', ' ')
+                print(f"{i:<4} {row['Дата']:<15} {value_str:>20}")
 
 def main():
     # Путь к папке с файлами
     input_folder = r"\\fs-01.renlife.com\alldocs\Инвестиционный департамент\7.0 Treasury\Фонд СЧА"
     
+    # Файл с результатами
+    output_file = Path(input_folder) / f"!_РЕЗУЛЬТАТЫ_СТОИМОСТЬ_ЧИСТЫХ_АКТИВОВ.csv"
+    
     # Создаем парсер и запускаем
-    parser = ExcelParser(input_folder, "")
+    parser = ExcelParser(input_folder, output_file)
     parser.run()
+    
 
 if __name__ == "__main__":
     main()
-🔍 ОТЛАДКА: Поиск ключевых слов в файле...
-   ------------------------------------------------------------
-   Строка 0, столбец 0 (A):
-      Значение: 'Расчет оценочной стоимости активов и стоимости чистых активов,
-составляющих инвестиционный портфель, по состоянию
-на 08.08.2025 г.'
-      Соседние ячейки справа:
-
-   Строка 7, столбец 0 (A):
-      Значение: '"ГАЗПРОМБАНК" (АКЦИОНЕРНОЕ ОБЩЕСТВО)'
-      Соседние ячейки справа:
-
-   Строка 8, столбец 0 (A):
-      Значение: 'Итого денежных средств на счетах'
-      Соседние ячейки справа:
-
-   Строка 14, столбец 0 (A):
-      Значение: 'Итого оценочная стоимость депозитов'
-      Соседние ячейки справа:
-
-   Строка 20, столбец 0 (A):
-      Значение: 'Итого оценочная стоимость депозитных сертификатов'
-      Соседние ячейки справа:
-
-   Строка 26, столбец 0 (A):
-      Значение: 'Итого оценочная стоимость государственных ценных бумаг Российской Федерации'
-      Соседние ячейки справа:
-
-   Строка 31, столбец 0 (A):
-      Значение: 'Итого оценочная стоимость государственных ценных бумаг Российской Федерации, специально выпущенных Правительством Российской Федерации для размещения средств институциональных инвесторов'
-      Соседние ячейки справа:
-
-   Строка 36, столбец 0 (A):
-      Значение: 'Итого оценочная стоимость облигаций внешних облигационных займов Российской Федерации'        
-      Соседние ячейки справа:
-
-   Строка 41, столбец 0 (A):
-      Значение: 'Итого оценочная стоимость государственных ценных бумаг субъектов Российской Федерации'        
-      Соседние ячейки справа:
-
-   Строка 46, столбец 0 (A):
-      Значение: 'Итого оценочная стоимость муниципальных облигаций'
-      Соседние ячейки справа:
-
-   Строка 51, столбец 0 (A):
-      Значение: 'Итого оценочная стоимость облигаций российских хозяйственных обществ'
-      Соседние ячейки справа:
-
-   Строка 56, столбец 0 (A):
-      Значение: 'Итого оценочная стоимость облигаций государственных корпораций'
-      Соседние ячейки справа:
-
-   Строка 61, столбец 0 (A):
-      Значение: 'Итого оценочная стоимость акций российских акционерных обществ'
-      Соседние ячейки справа:
-
-   Строка 66, столбец 0 (A):
-      Значение: 'Итого оценочная стоимость облигаций с ипотечным покрытием'
-      Соседние ячейки справа:
-
-   Строка 71, столбец 0 (A):
-      Значение: 'Итого оценочная стоимость ипотечных сертификатов участия'
-      Соседние ячейки справа:
-
-   Строка 76, столбец 0 (A):
-      Значение: 'Итого оценочная стоимость инвестиционных паев паевых инвестиционных фондов'
-      Соседние ячейки справа:
-
-   Строка 81, столбец 0 (A):
-      Значение: 'Итого оценочная стоимость ценных бумаг правительств иностранных государств'
-      Соседние ячейки справа:
-
-   Строка 86, столбец 0 (A):
-      Значение: 'Итого оценочная стоимость ценных бумаг международных финансовых организаций'
-      Соседние ячейки справа:
-
-   Строка 91, столбец 0 (A):
-      Значение: 'Итого оценочная стоимость акций иностранных акционерных обществ'
-      Соседние ячейки справа:
-
-   Строка 96, столбец 0 (A):
-      Значение: 'Итого оценочная стоимость облигаций иностранных коммерческих организаций'
-      Соседние ячейки справа:
-
-   Строка 101, столбец 0 (A):
-      Значение: 'Итого оценочная стоимость акций (паев, долей) иностранных инвестиционных фондов'
-      Соседние ячейки справа:
-
-   Строка 106, столбец 0 (A):
-      Значение: 'Итого оценочная стоимость объектов недвижимого имущества'
-      Соседние ячейки справа:
-
-   Строка 112, столбец 0 (A):
-      Значение: 'Итого оценочная стоимость иного имущества'
-      Соседние ячейки справа:
-
-   Строка 113, столбец 0 (A):
-      Значение: 'Итого оценочная стоимость активов'
-      Соседние ячейки справа:
-
-   Строка 121, столбец 0 (A):
-      Значение: 'Итого средств на специальных брокерских счетах'
-      Соседние ячейки справа:
-
-   Строка 126, столбец 0 (A):
-      Значение: 'Итого средств на счетах клиринговых центров'
-      Соседние ячейки справа:
-
-   Строка 128, столбец 0 (A):
-      Значение: 'Корректирующая величина, определенная по опционным контрактам, по которым лицо, действующее за счет активов, составляющих инвестиционный портфель, является управомоченным лицом'
-      Соседние ячейки справа:
-
-   Строка 131, столбец 0 (A):
-      Значение: 'Итого корректирующая величина'
-      Соседние ячейки справа:
-   Строка 155, столбец 0 (A):
-      Значение: 'Итого стоимость чистых активов'
-      Соседние ячейки справа:
-
-   ------------------------------------------------------------
-
-   🔍 Ищу: 'Итого стоимость чистых активов' в любом столбце
-   📍 Беру число из столбца: P (индекс 15)
-      ✅ Найдено ключевое слово в строке 155, столбец 0
-      📍 Значение в столбце 15 (P): '2 662 408,68 руб.'
-      ⚠️ Не удалось преобразовать в число: '2 662 408,68 руб.'
-   ⚠️ Ключевое слово не найдено
-
