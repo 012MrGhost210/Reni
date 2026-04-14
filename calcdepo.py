@@ -15,7 +15,12 @@ def parse_number(text):
     """Преобразует строку с числами в формате '12 122 121,31' в float"""
     if isinstance(text, (int, float)):
         return float(text)
-    return float(str(text).replace(' ', '').replace(',', '.'))
+    # Убираем пробелы и заменяем запятую на точку
+    cleaned = str(text).strip().replace(' ', '').replace(',', '.')
+    # Если строка пустая или не число, возвращаем 0
+    if not cleaned:
+        return 0.0
+    return float(cleaned)
 
 def format_number(number):
     """Форматирует число в строку с пробелами тысяч и запятой для десятичных"""
@@ -186,9 +191,9 @@ def on_deposit_count_change(*args):
     entry_payment = tk.Entry(payments_frame, width=30)
     entry_payment.pack(side=tk.LEFT, padx=(0, 10))
     
-    # Кнопка для поиска платежей от контрагентов
-    btn_find_payments = tk.Button(payments_frame, text="Найти платежи от контрагентов", 
-                                  command=find_and_fill_payments, bg="#FF9800", fg="white")
+    # Кнопка для поиска платежей от контрагентов (теперь будет добавлять к существующей сумме)
+    btn_find_payments = tk.Button(payments_frame, text="Добавить платежи от контрагентов", 
+                                  command=add_tracked_payments, bg="#FF9800", fg="white")
     btn_find_payments.pack(side=tk.LEFT)
     
     if count == "1":
@@ -247,8 +252,8 @@ def on_deposit_count_change(*args):
                 'date': entry_date_dep
             })
 
-def find_and_fill_payments():
-    """Находит платежи от отслеживаемых контрагентов и заполняет поле суммы платежей"""
+def add_tracked_payments():
+    """Находит платежи от отслеживаемых контрагентов и ДОБАВЛЯЕТ к уже введенной сумме"""
     tracked_payments = get_tracked_payments()
     
     if not tracked_payments:
@@ -256,23 +261,39 @@ def find_and_fill_payments():
         return
     
     # Суммируем все найденные платежи
-    total_payments = sum(p['amount'] for p in tracked_payments)
+    total_found = sum(p['amount'] for p in tracked_payments)
     
     # Формируем сообщение о найденных платежах
     payments_info = f"Найдено платежей: {len(tracked_payments)}\n\n"
     for payment in tracked_payments:
         payments_info += f"• {payment['contractor'][:50]}: {format_number(payment['amount'])}\n"
-    payments_info += f"\nОбщая сумма: {format_number(total_payments)}"
+    payments_info += f"\nОбщая сумма найденных платежей: {format_number(total_found)}"
     
-    # Спрашиваем пользователя, хочет ли он использовать эту сумму
+    # Получаем текущую сумму из поля
+    current_text = entry_payment.get().strip()
+    current_amount = 0
+    if current_text:
+        try:
+            current_amount = parse_number(current_text)
+        except:
+            pass
+    
+    new_amount = current_amount + total_found
+    
+    # Спрашиваем пользователя, хочет ли он добавить эту сумму
     result = messagebox.askyesno("Найдены платежи", 
-                                 f"{payments_info}\n\nИспользовать эту сумму для платежей сегодня?")
+                                 f"{payments_info}\n\n"
+                                 f"Текущая сумма: {format_number(current_amount)}\n"
+                                 f"Добавить найденные платежи?\n\n"
+                                 f"Новая сумма будет: {format_number(new_amount)}")
     
     if result:
-        # Очищаем поле и вставляем сумму
+        # Обновляем поле с новой суммой
         entry_payment.delete(0, tk.END)
-        entry_payment.insert(0, str(total_payments).replace('.', ','))
-        messagebox.showinfo("Успех", f"Сумма {format_number(total_payments)} добавлена в поле платежей")
+        entry_payment.insert(0, str(new_amount).replace('.', ','))
+        messagebox.showinfo("Успех", 
+                          f"Сумма {format_number(total_found)} добавлена!\n"
+                          f"Общая сумма платежей: {format_number(new_amount)}")
 
 def process_calculation():
     """Основная функция обработки"""
@@ -348,7 +369,9 @@ def process_calculation():
 Срок: до {target_date} ({days_info} дней)
 Ставка: {interest_rate}%
 
-Счёт списания и счёт зачисления 40701.810.7.00000005417"""
+Счёт списания и счёт зачисления 40701.810.7.00000005417
+
+Сумма платежей сегодня: {format_number(payment_amount)}"""
             
             # Сохраняем данные для подтверждения
             root.deposits_data = [{
@@ -411,14 +434,12 @@ def process_calculation():
                 message += f"Ставка: {deposit['rate']}%\n"
                 message += f"Срок: до {deposit['date']} ({deposit['days']} дней)\n\n"
             
-            message += f"Счёт списания и счёт зачисления 40701.810.7.00000005417"
+            message += f"Счёт списания и счёт зачисления 40701.810.7.00000005417\n\n"
+            message += f"Сумма платежей сегодня: {format_number(payment_amount)}"
             
             # Сохраняем данные для подтверждения
             root.deposits_data = deposits_data
             root.total_amount = total_amount
-        
-        # Дополнительно показываем информацию о платежах
-        message += f"\n\nСумма платежей сегодня: {format_number(payment_amount)}"
         
         # Показываем результат
         result_text.delete(1.0, tk.END)
@@ -457,20 +478,44 @@ def confirm_deposits():
 # Создаем графический интерфейс
 root = tk.Tk()
 root.title("Расчет депозитов ГПБ")
-root.geometry("600x800")
+root.geometry("650x700")
 
+# СОЗДАЕМ ГЛАВНЫЙ КОНТЕЙНЕР С ПРОКРУТКОЙ
+main_canvas = tk.Canvas(root)
+scrollbar_vertical = tk.Scrollbar(root, orient="vertical", command=main_canvas.yview)
+scrollable_frame = tk.Frame(main_canvas)
+
+scrollable_frame.bind(
+    "<Configure>",
+    lambda e: main_canvas.configure(scrollregion=main_canvas.bbox("all"))
+)
+
+main_canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+main_canvas.configure(yscrollcommand=scrollbar_vertical.set)
+
+# Упаковываем Canvas и Scrollbar
+main_canvas.pack(side="left", fill="both", expand=True)
+scrollbar_vertical.pack(side="right", fill="y")
+
+# Привязываем колесико мыши к прокрутке
+def on_mousewheel(event):
+    main_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+
+main_canvas.bind_all("<MouseWheel>", on_mousewheel)
+
+# ВСЕ ВИДЖЕТЫ ТЕПЕРЬ СОЗДАЕМ В scrollable_frame ВМЕСТО root
 # Информация о файле
-frame_info = tk.Frame(root)
+frame_info = tk.Frame(scrollable_frame)
 frame_info.pack(pady=10, padx=20, fill=tk.X)
 
 tk.Label(frame_info, text=f"Файл баланса: {FILE1_PATH}", 
-         wraplength=500, justify=tk.LEFT, fg="blue").pack(anchor=tk.W)
+         wraplength=550, justify=tk.LEFT, fg="blue").pack(anchor=tk.W)
 
 label_balance = tk.Label(frame_info, text="Баланс: не загружен", fg="red")
 label_balance.pack(anchor=tk.W, pady=(5, 0))
 
 # Выбор количества депозитов
-frame_deposit_count = tk.Frame(root)
+frame_deposit_count = tk.Frame(scrollable_frame)
 frame_deposit_count.pack(pady=10, padx=20, fill=tk.X)
 
 tk.Label(frame_deposit_count, text="Количество депозитов:").pack(anchor=tk.W)
@@ -484,51 +529,52 @@ deposit_combo.pack(anchor=tk.W, pady=(5, 10))
 deposit_count.trace('w', on_deposit_count_change)
 
 # Фрейм для полей ввода
-deposit_fields_frame = tk.Frame(root)
+deposit_fields_frame = tk.Frame(scrollable_frame)
 deposit_fields_frame.pack(pady=10, padx=20, fill=tk.X, expand=True)
 
 # Инициализируем поля для одного депозита
 on_deposit_count_change()
 
 # Кнопка выполнения
-btn_process = tk.Button(root, text="Сформировать сообщение", 
+btn_process = tk.Button(scrollable_frame, text="Сформировать сообщение", 
                        command=process_calculation,
                        bg="#4CAF50", fg="white", font=("Arial", 12, "bold"))
 btn_process.pack(pady=10)
 
 # Кнопка подтверждения
-btn_confirm = tk.Button(root, text="Подтвердить размещение депозитов", 
+btn_confirm = tk.Button(scrollable_frame, text="Подтвердить размещение депозитов", 
                        command=confirm_deposits,
                        state=tk.DISABLED, bg="light gray", fg="black", font=("Arial", 12, "bold"))
 btn_confirm.pack(pady=5)
 
 # Поле для результата
-tk.Label(root, text="Результат:").pack(anchor=tk.W, padx=20)
-result_text = tk.Text(root, height=15, width=70, font=("Arial", 10))
+tk.Label(scrollable_frame, text="Результат:").pack(anchor=tk.W, padx=20)
+result_text = tk.Text(scrollable_frame, height=12, width=70, font=("Arial", 10))
 result_text.pack(pady=10, padx=20, fill=tk.BOTH, expand=True)
 
-# Добавляем скроллбар
-scrollbar = tk.Scrollbar(result_text)
-scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-result_text.config(yscrollcommand=scrollbar.set)
-scrollbar.config(command=result_text.yview)
+# Добавляем скроллбар для текста
+scrollbar_text = tk.Scrollbar(result_text)
+scrollbar_text.pack(side=tk.RIGHT, fill=tk.Y)
+result_text.config(yscrollcommand=scrollbar_text.set)
+scrollbar_text.config(command=result_text.yview)
 
 # Инструкция
 instruction = """
 ИНСТРУКЦИЯ:
 1. Выберите количество депозитов
-2. Заполните сумму платежей сегодня (можно нажать кнопку "Найти платежи от контрагентов" для автоматического поиска)
+2. Заполните сумму платежей сегодня (можно нажать кнопку "Добавить платежи от контрагентов" 
+   для автоматического добавления платежей от ПОЧТА РОССИИ к текущей сумме)
 3. Заполните поля для депозитов:
    • 1 депозит: ставка, дата
    • 2+ депозита: сумма, ставка и дата для КАЖДОГО депозита
-4. Сумма всех депозитов не должна превышать доступный остаток (баланс - платежи - 150000)
+4. Сумма всех депозитов не должна превышать доступный остаток (баланс - платежи - 150000/10000)
 5. Нажмите "Сформировать сообщение"
 6. Сообщение автоматически скопируется в буфер обмена
 7. Нажмите "Подтвердить размещение депозитов" для сохранения в реестр
 
-Примечание: Система автоматически отслеживает платежи от контрагентов "ПОЧТА РОССИИ" и позволяет быстро добавить их сумму.
+Примечание: Используйте колесико мыши для прокрутки окна при большом количестве депозитов.
 """
-tk.Label(root, text=instruction, justify=tk.LEFT, fg="gray", 
+tk.Label(scrollable_frame, text=instruction, justify=tk.LEFT, fg="gray", 
          font=("Arial", 8)).pack(anchor=tk.W, padx=20, pady=(0, 10))
 
 # Запускаем приложение
