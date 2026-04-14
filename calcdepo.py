@@ -8,9 +8,14 @@ from datetime import datetime
 FILE1_PATH = r"M:\Финансовый департамент\Treasury\Базы данных(автоматизация)\DI_DATABASE\Депозит.xlsx"
 REGISTRY_FILE_PATH = r"\\fs-01.renlife.com\alldocs\Инвестиционный департамент\7.0 Treasury\BigData\Deposit.xlsx"
 
+# Список контрагентов для отслеживания (можно добавить других)
+TRACKED_CONTRACTORS = ["ПОЧТА РОССИИ", "Почта России"]
+
 def parse_number(text):
     """Преобразует строку с числами в формате '12 122 121,31' в float"""
-    return float(text.replace(' ', '').replace(',', '.'))
+    if isinstance(text, (int, float)):
+        return float(text)
+    return float(str(text).replace(' ', '').replace(',', '.'))
 
 def format_number(number):
     """Форматирует число в строку с пробелами тысяч и запятой для десятичных"""
@@ -31,6 +36,45 @@ def calculate_days_until(target_date_str):
     
     # Если не удалось распарсить, возвращаем исходную строку
     return target_date_str
+
+def get_tracked_payments():
+    """Читает файл и находит платежи от отслеживаемых контрагентов"""
+    try:
+        if not os.path.exists(FILE1_PATH):
+            return []
+        
+        df = pd.read_excel(FILE1_PATH)
+        if df.empty:
+            return []
+        
+        tracked_payments = []
+        
+        # Столбец I - контрагенты, столбец H - суммы
+        # Предполагаем, что столбцы: H (индекс 7) - суммы, I (индекс 8) - контрагенты
+        for idx, row in df.iterrows():
+            if len(row) > 8:  # Проверяем, что есть столбец I
+                contractor = str(row.iloc[8]) if pd.notna(row.iloc[8]) else ""
+                
+                # Проверяем, содержит ли наименование контрагента отслеживаемое слово
+                for tracked in TRACKED_CONTRACTORS:
+                    if tracked in contractor.upper():
+                        # Нашли отслеживаемого контрагента
+                        amount = 0
+                        if len(row) > 7 and pd.notna(row.iloc[7]):
+                            amount = parse_number(row.iloc[7])
+                        
+                        tracked_payments.append({
+                            'contractor': contractor,
+                            'amount': amount,
+                            'row': idx + 2  # +2 для учета заголовков и индексации от 1
+                        })
+                        break
+        
+        return tracked_payments
+        
+    except Exception as e:
+        print(f"Ошибка при поиске платежей: {e}")
+        return []
 
 def save_to_registry(deposits_data, total_amount):
     """Сохраняет данные о депозитах в реестр"""
@@ -131,13 +175,24 @@ def on_deposit_count_change(*args):
     for widget in deposit_fields_frame.winfo_children():
         widget.destroy()
     
+    # Всегда показываем поле для суммы платежей (для любого количества депозитов)
+    tk.Label(deposit_fields_frame, text="Сумма платежей сегодня:", font=("Arial", 10, "bold")).pack(anchor=tk.W, pady=(0, 5))
+    
+    # Создаем фрейм для платежей
+    payments_frame = tk.Frame(deposit_fields_frame)
+    payments_frame.pack(fill=tk.X, pady=(0, 10))
+    
+    global entry_payment
+    entry_payment = tk.Entry(payments_frame, width=30)
+    entry_payment.pack(side=tk.LEFT, padx=(0, 10))
+    
+    # Кнопка для поиска платежей от контрагентов
+    btn_find_payments = tk.Button(payments_frame, text="Найти платежи от контрагентов", 
+                                  command=find_and_fill_payments, bg="#FF9800", fg="white")
+    btn_find_payments.pack(side=tk.LEFT)
+    
     if count == "1":
         # Поля для одного депозита (старая логика)
-        tk.Label(deposit_fields_frame, text="Сумма платежей сегодня:").pack(anchor=tk.W)
-        global entry_payment
-        entry_payment = tk.Entry(deposit_fields_frame, width=30)
-        entry_payment.pack(fill=tk.X, pady=(5, 10))
-        
         tk.Label(deposit_fields_frame, text="Ставка (%):").pack(anchor=tk.W)
         global entry_rate
         entry_rate = tk.Entry(deposit_fields_frame, width=30)
@@ -153,15 +208,12 @@ def on_deposit_count_change(*args):
     else:
         # Поля для нескольких депозитов
         count_num = int(count)
+        
+        # Создаем разделитель
+        tk.Frame(deposit_fields_frame, height=2, bg="gray").pack(fill=tk.X, pady=10)
+        
         tk.Label(deposit_fields_frame, text=f"Данные для {count_num} депозитов:", 
                  font=("Arial", 10, "bold")).pack(anchor=tk.W, pady=(0, 10))
-        
-        # Показываем доступный остаток
-        if hasattr(root, 'initial_balance'):
-            available_balance = root.initial_balance - 150000
-            tk.Label(deposit_fields_frame, 
-                    text=f"Доступно для размещения: {format_number(available_balance)}",
-                    fg="green", font=("Arial", 9, "bold")).pack(anchor=tk.W, pady=(0, 10))
         
         # Создаем поля для каждого депозита
         global deposit_entries
@@ -169,7 +221,7 @@ def on_deposit_count_change(*args):
         
         for i in range(count_num):
             dep_frame = tk.Frame(deposit_fields_frame, relief=tk.GROOVE, bd=1, padx=10, pady=8)
-            dep_frame.pack(fill=tk.X, pady=3)
+            dep_frame.pack(fill=tk.X, pady=5)
             
             tk.Label(dep_frame, text=f"Депозит {i+1}", font=("Arial", 9, "bold")).pack(anchor=tk.W)
             
@@ -194,6 +246,33 @@ def on_deposit_count_change(*args):
                 'rate': entry_rate_dep,
                 'date': entry_date_dep
             })
+
+def find_and_fill_payments():
+    """Находит платежи от отслеживаемых контрагентов и заполняет поле суммы платежей"""
+    tracked_payments = get_tracked_payments()
+    
+    if not tracked_payments:
+        messagebox.showinfo("Информация", "Платежи от отслеживаемых контрагентов не найдены")
+        return
+    
+    # Суммируем все найденные платежи
+    total_payments = sum(p['amount'] for p in tracked_payments)
+    
+    # Формируем сообщение о найденных платежах
+    payments_info = f"Найдено платежей: {len(tracked_payments)}\n\n"
+    for payment in tracked_payments:
+        payments_info += f"• {payment['contractor'][:50]}: {format_number(payment['amount'])}\n"
+    payments_info += f"\nОбщая сумма: {format_number(total_payments)}"
+    
+    # Спрашиваем пользователя, хочет ли он использовать эту сумму
+    result = messagebox.askyesno("Найдены платежи", 
+                                 f"{payments_info}\n\nИспользовать эту сумму для платежей сегодня?")
+    
+    if result:
+        # Очищаем поле и вставляем сумму
+        entry_payment.delete(0, tk.END)
+        entry_payment.insert(0, str(total_payments).replace('.', ','))
+        messagebox.showinfo("Успех", f"Сумма {format_number(total_payments)} добавлена в поле платежей")
 
 def process_calculation():
     """Основная функция обработки"""
@@ -227,16 +306,22 @@ def process_calculation():
             messagebox.showerror("Ошибка", f"Ошибка чтения файла 1: {str(e)}")
             return
         
+        # Получаем сумму платежей (обязательное поле для всех вариантов)
+        try:
+            payment_amount = parse_number(entry_payment.get())
+        except Exception as e:
+            messagebox.showerror("Ошибка", "Введите корректную сумму платежей")
+            return
+        
         count = deposit_count.get()
         
         if count == "1":
             # Обработка одного депозита
             try:
-                payment_amount = parse_number(entry_payment.get())
                 interest_rate = entry_rate.get().strip()
                 target_date = entry_date.get().strip()
                 
-                if not payment_amount or not interest_rate or not target_date:
+                if not interest_rate or not target_date:
                     messagebox.showerror("Ошибка", "Заполните все поля")
                     return
                     
@@ -244,7 +329,7 @@ def process_calculation():
                 messagebox.showerror("Ошибка", f"Ошибка в данных: {str(e)}")
                 return
             
-            # Выполняем расчеты
+            # Выполняем расчеты (вычитаем платежи)
             final_amount = initial_balance - payment_amount - 150000
             rounded_amount = round(final_amount / 1000) * 1000  # Округление до тысяч
             
@@ -261,7 +346,9 @@ def process_calculation():
 
 Сумма: {format_number(rounded_amount)}
 Срок: до {target_date} ({days_info} дней)
-Ставка: {interest_rate}%"""
+Ставка: {interest_rate}%
+
+Счёт списания и счёт зачисления 40701.810.7.00000005417"""
             
             # Сохраняем данные для подтверждения
             root.deposits_data = [{
@@ -302,8 +389,9 @@ def process_calculation():
                 messagebox.showerror("Ошибка", f"Ошибка в данных: {str(e)}")
                 return
             
-            # Проверяем, что общая сумма не превышает доступный остаток
-            available_balance = initial_balance - 10000
+            # Доступный остаток после вычета платежей
+            available_balance = initial_balance - payment_amount - 10000
+            
             if total_amount > available_balance:
                 messagebox.showerror("Ошибка", 
                     f"Общая сумма депозитов ({format_number(total_amount)}) превышает доступный остаток!\n\n"
@@ -322,12 +410,16 @@ def process_calculation():
                 message += f"Сумма: {format_number(deposit['amount'])}\n"
                 message += f"Ставка: {deposit['rate']}%\n"
                 message += f"Срок: до {deposit['date']} ({deposit['days']} дней)\n\n"
-                message += f"Счёт списания и счёт зачисления 40701.810.7.00000005417"
-
+            
+            message += f"Счёт списания и счёт зачисления 40701.810.7.00000005417"
+            
             # Сохраняем данные для подтверждения
             root.deposits_data = deposits_data
             root.total_amount = total_amount
-
+        
+        # Дополнительно показываем информацию о платежах
+        message += f"\n\nСумма платежей сегодня: {format_number(payment_amount)}"
+        
         # Показываем результат
         result_text.delete(1.0, tk.END)
         result_text.insert(1.0, message)
@@ -342,6 +434,8 @@ def process_calculation():
         
     except Exception as e:
         messagebox.showerror("Ошибка", f"Произошла ошибка: {str(e)}")
+        import traceback
+        traceback.print_exc()
 
 def confirm_deposits():
     """Подтверждение и сохранение депозитов в реестр"""
@@ -363,7 +457,7 @@ def confirm_deposits():
 # Создаем графический интерфейс
 root = tk.Tk()
 root.title("Расчет депозитов ГПБ")
-root.geometry("550x700")
+root.geometry("600x800")
 
 # Информация о файле
 frame_info = tk.Frame(root)
@@ -391,7 +485,7 @@ deposit_count.trace('w', on_deposit_count_change)
 
 # Фрейм для полей ввода
 deposit_fields_frame = tk.Frame(root)
-deposit_fields_frame.pack(pady=10, padx=20, fill=tk.X)
+deposit_fields_frame.pack(pady=10, padx=20, fill=tk.X, expand=True)
 
 # Инициализируем поля для одного депозита
 on_deposit_count_change()
@@ -410,7 +504,7 @@ btn_confirm.pack(pady=5)
 
 # Поле для результата
 tk.Label(root, text="Результат:").pack(anchor=tk.W, padx=20)
-result_text = tk.Text(root, height=12, width=65, font=("Arial", 10))
+result_text = tk.Text(root, height=15, width=70, font=("Arial", 10))
 result_text.pack(pady=10, padx=20, fill=tk.BOTH, expand=True)
 
 # Добавляем скроллбар
@@ -421,15 +515,18 @@ scrollbar.config(command=result_text.yview)
 
 # Инструкция
 instruction = """
-Инструкция:
+ИНСТРУКЦИЯ:
 1. Выберите количество депозитов
-2. Заполните поля в зависимости от выбора:
-   • 1 депозит: сумма платежей, ставка, дата
+2. Заполните сумму платежей сегодня (можно нажать кнопку "Найти платежи от контрагентов" для автоматического поиска)
+3. Заполните поля для депозитов:
+   • 1 депозит: ставка, дата
    • 2+ депозита: сумма, ставка и дата для КАЖДОГО депозита
-3. Сумма всех депозитов не должна превышать доступный остаток
-4. Нажмите "Сформировать сообщение"
-5. Сообщение автоматически скопируется в буфер обмена
-6. Нажмите "Подтвердить размещение депозитов" для сохранения в реестр
+4. Сумма всех депозитов не должна превышать доступный остаток (баланс - платежи - 150000)
+5. Нажмите "Сформировать сообщение"
+6. Сообщение автоматически скопируется в буфер обмена
+7. Нажмите "Подтвердить размещение депозитов" для сохранения в реестр
+
+Примечание: Система автоматически отслеживает платежи от контрагентов "ПОЧТА РОССИИ" и позволяет быстро добавить их сумму.
 """
 tk.Label(root, text=instruction, justify=tk.LEFT, fg="gray", 
          font=("Arial", 8)).pack(anchor=tk.W, padx=20, pady=(0, 10))
@@ -437,6 +534,3 @@ tk.Label(root, text=instruction, justify=tk.LEFT, fg="gray",
 # Запускаем приложение
 if __name__ == "__main__":
     root.mainloop()
-    
-АКЦИОНЕРНОЕ ОБЩЕСТВО "ПОЧТА РОССИИ"
-ПЕРЕЧИСЛЕНИЕ ДЕНЕЖНЫХ СРЕДСТВ ЗА РЕАЛИЗАЦИЮ КОМПЛЕКТОВ ДОКУМЕНТОВ ПО ДОГОВОРУ
