@@ -76,10 +76,10 @@ class ReportSenderApp:
         self.root.geometry("650x500")
         
         # Базовый путь - ИСПРАВЛЕНО
-        self.base_path = tk.StringVar(value=r"M:\Финансы\Спец")
+        self.base_path = tk.StringVar(value=r"M:\Финансовый департамент\SpecDep")
         
         # Получатель
-        self.recipient = tk.StringVar(value="broker@example.com")
+        self.recipient = tk.StringVar(value="Ulyana.Pankratova@renlife.com")
         
         # Тема письма
         self.subject = tk.StringVar(value="Отчеты брокера")
@@ -93,7 +93,7 @@ class ReportSenderApp:
     
     def create_widgets(self):
         # Базовый путь
-        tk.Label(self.root, text="Базовая папка (M:\\Финансы\\Спец):").pack(pady=(10,0))
+        tk.Label(self.root, text="Базовая папка M:\Финансовый департамент\SpecDep:").pack(pady=(10,0))
         path_frame = tk.Frame(self.root)
         path_frame.pack(fill=tk.X, padx=20, pady=5)
         tk.Entry(path_frame, textvariable=self.base_path, width=50).pack(side=tk.LEFT, fill=tk.X, expand=True)
