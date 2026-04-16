@@ -7,14 +7,16 @@ from tkinter import filedialog, messagebox, ttk
 import win32com.client as win32
 
 def get_date_folder(date_obj):
-    """Возвращает строку с датой в формате ДД.ММ.ГГ"""
-    return date_obj.strftime("%d.%m.%y")
+    """Возвращает строку с датой в формате ДДММГГ (без разделителей)"""
+    return date_obj.strftime("%d%m%y")
 
 def find_source_folder(base_path, target_date):
     """Ищет папку с отчетами за указанную дату"""
     date_str = get_date_folder(target_date)
-    # Формируем имя искомой папки: M:\Финансы\Спец\26.04.15\отч_брокера+
+    # Формируем имя искомой папки: M:\Финансы\Спец\260415\отч_брокера+
     folder_path = os.path.join(base_path, date_str, "отч_брокера+")
+    
+    print(f"Поиск папки: {folder_path}")  # Отладка
     
     if os.path.exists(folder_path) and os.path.isdir(folder_path):
         return folder_path
@@ -73,13 +75,13 @@ class ReportSenderApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Отправка отчетов брокера")
-        self.root.geometry("650x500")
+        self.root.geometry("650x550")
         
-        # Базовый путь - ИСПРАВЛЕНО
-        self.base_path = tk.StringVar(value=r"M:\Финансовый департамент\SpecDep")
+        # Базовый путь
+        self.base_path = tk.StringVar(value=r"M:\Финансы\Спец")
         
         # Получатель
-        self.recipient = tk.StringVar(value="Ulyana.Pankratova@renlife.com")
+        self.recipient = tk.StringVar(value="broker@example.com")
         
         # Тема письма
         self.subject = tk.StringVar(value="Отчеты брокера")
@@ -93,21 +95,24 @@ class ReportSenderApp:
     
     def create_widgets(self):
         # Базовый путь
-        tk.Label(self.root, text="Базовая папка M:\Финансовый департамент\SpecDep:").pack(pady=(10,0))
+        tk.Label(self.root, text="Базовая папка (M:\\Финансы\\Спец):").pack(pady=(10,0))
         path_frame = tk.Frame(self.root)
         path_frame.pack(fill=tk.X, padx=20, pady=5)
         tk.Entry(path_frame, textvariable=self.base_path, width=50).pack(side=tk.LEFT, fill=tk.X, expand=True)
         tk.Button(path_frame, text="Обзор...", command=self.browse_folder).pack(side=tk.RIGHT, padx=5)
         
         # Выбор даты
-        tk.Label(self.root, text="Выберите дату отчета (в формате ДД.ММ.ГГ):").pack(pady=(10,0))
-        self.date_combo = ttk.Combobox(self.root, state="readonly", width=25)
+        tk.Label(self.root, text="Выберите дату отчета:").pack(pady=(10,0))
+        self.date_combo = ttk.Combobox(self.root, state="readonly", width=30)
         self.date_combo.pack(pady=5)
         self.date_combo.bind('<<ComboboxSelected>>', self.on_date_selected)
         
         # Информация о найденной папке
         self.folder_info = tk.Label(self.root, text="Папка не выбрана", fg="gray", wraplength=600, justify="left")
         self.folder_info.pack(pady=5)
+        
+        # Разделитель
+        tk.Frame(self.root, height=2, bd=1, relief=tk.SUNKEN).pack(fill=tk.X, padx=5, pady=10)
         
         # Получатель
         tk.Label(self.root, text="Получатель (email):").pack(pady=(10,0))
@@ -143,7 +148,9 @@ class ReportSenderApp:
         default_dates = get_default_dates(self.today)
         date_options = []
         for date in default_dates:
-            date_options.append(f"{date.strftime('%d.%m.%y')} ({date.strftime('%d.%m.%Y')})")
+            # Показываем понятный пользователю формат, но храним дату для поиска
+            display = f"{date.strftime('%d.%m.%Y')} (папка: {get_date_folder(date)})"
+            date_options.append(display)
         date_options.append("Другая дата...")
         
         self.date_combo['values'] = date_options
@@ -157,10 +164,10 @@ class ReportSenderApp:
         if selection == "Другая дата...":
             self.select_custom_date()
         else:
-            # Извлекаем дату из строки (формат ДД.ММ.ГГ)
+            # Извлекаем дату из строки (первая часть до пробела)
             date_str = selection.split(" ")[0]
             try:
-                selected_date = datetime.strptime(date_str, "%d.%m.%y").date()
+                selected_date = datetime.strptime(date_str, "%d.%m.%Y").date()
                 self.check_folder_for_date(selected_date)
             except Exception as e:
                 self.folder_info.config(text=f"Ошибка при разборе даты: {e}", fg="red")
@@ -169,30 +176,25 @@ class ReportSenderApp:
         """Диалог выбора произвольной даты"""
         dialog = tk.Toplevel(self.root)
         dialog.title("Выбор даты")
-        dialog.geometry("350x180")
+        dialog.geometry("400x200")
         dialog.grab_set()
         
-        tk.Label(dialog, text="Введите дату в формате ДД.ММ.ГГ или ДД.ММ.ГГГГ:").pack(pady=10)
+        tk.Label(dialog, text="Введите дату в формате ДД.ММ.ГГГГ:").pack(pady=10)
         date_entry = tk.Entry(dialog, width=15)
         date_entry.pack(pady=5)
+        
+        tk.Label(dialog, text="Пример: 15.04.2026", fg="gray", font=("Arial", 8)).pack()
         
         def confirm():
             try:
                 date_str = date_entry.get().strip()
-                # Пробуем разные форматы
-                for fmt in ["%d.%m.%y", "%d.%m.%Y"]:
-                    try:
-                        selected_date = datetime.strptime(date_str, fmt).date()
-                        dialog.destroy()
-                        self.check_folder_for_date(selected_date)
-                        # Обновляем комбобокс
-                        self.date_combo.set(f"{selected_date.strftime('%d.%m.%y')} ({selected_date.strftime('%d.%m.%Y')})")
-                        return
-                    except:
-                        continue
-                raise ValueError("Неверный формат")
+                selected_date = datetime.strptime(date_str, "%d.%m.%Y").date()
+                dialog.destroy()
+                self.check_folder_for_date(selected_date)
+                # Обновляем комбобокс
+                self.date_combo.set(f"{selected_date.strftime('%d.%m.%Y')} (папка: {get_date_folder(selected_date)})")
             except ValueError:
-                messagebox.showerror("Ошибка", "Неверный формат даты. Используйте ДД.ММ.ГГ или ДД.ММ.ГГГГ")
+                messagebox.showerror("Ошибка", "Неверный формат даты. Используйте ДД.ММ.ГГГГ")
         
         tk.Button(dialog, text="Подтвердить", command=confirm).pack(pady=10)
     
@@ -204,14 +206,14 @@ class ReportSenderApp:
             # Проверяем, что в папке есть файлы
             files = [f for f in os.listdir(self.selected_folder) if os.path.isfile(os.path.join(self.selected_folder, f))]
             if files:
-                self.folder_info.config(text=f"✓ Найдена папка: {self.selected_folder}\n✓ Файлов для отправки: {len(files)}", fg="green")
+                self.folder_info.config(text=f"✓ Найдена папка: {self.selected_folder}\n✓ Файлов для отправки: {len(files)}\n\nФайлы:\n" + "\n".join(f"  • {f}" for f in files[:5]) + ("\n  ..." if len(files) > 5 else ""), fg="green")
                 self.status_label.config(text=f"Готов к отправке отчета за {selected_date.strftime('%d.%m.%Y')}", fg="green")
             else:
                 self.folder_info.config(text=f"⚠ Папка найдена, но она пуста: {self.selected_folder}", fg="orange")
                 self.selected_folder = None
         else:
             expected_path = os.path.join(self.base_path.get(), get_date_folder(selected_date), "отч_брокера+")
-            self.folder_info.config(text=f"✗ Папка НЕ найдена!\nОжидалось: {expected_path}\n(Обратите внимание на наличие знака '+' в конце 'отч_брокера+')", fg="red")
+            self.folder_info.config(text=f"✗ Папка НЕ найдена!\nОжидалось: {expected_path}\n\nПроверьте:\n1. Существует ли папка {get_date_folder(selected_date)}\n2. Есть ли внутри папка 'отч_брокера+' (именно с плюсом)\n3. Правильный ли базовый путь", fg="red")
             self.status_label.config(text="Папка не найдена", fg="red")
             self.selected_folder = None
     
