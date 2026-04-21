@@ -26,6 +26,11 @@ TARGETS = [
         "short_name": "ТКБ",
         "path": "7825489723-ТКБ Инвестмент Партнерс (АО)",
         "search_pattern": "Сводная РСА-СЧА"
+    },
+    {
+        "short_name": "Первая",
+        "path": "7718000366-АО -УК -Первая-",
+        "search_pattern": "Сводная СЧА"
     }
 ]
 
@@ -311,6 +316,122 @@ def process_raif():
     except Exception as e:
         return f" Райф: {str(e)[:150]}"
 
+def process_first():
+    """Обработка УК Первая (Сводная СЧА)"""
+    files = glob.glob(os.path.join(destination_folder, '**', '*Сводная СЧА*.xlsx'), recursive=True)
+    if not files:
+        return " Первая: файлы не найдены"
+    
+    try:
+        excel_file = pd.ExcelFile(files[0])
+        sheets = sorted(excel_file.sheet_names, key=natural_sort_key)
+        
+        scha_data = {}
+        
+        for sheet in sheets:
+            if sheet in ["ИТОГО", "Total", "Сводка"]:
+                continue
+                
+            df = pd.read_excel(files[0], sheet_name=sheet, header=None)
+            
+            header_row = None
+            data_start_row = None
+            
+            for idx, row in df.iterrows():
+                row_str = ' '.join(str(v) for v in row.values if pd.notna(v))
+                if 'п/п' in row_str and 'День' in row_str and 'СЧА' in row_str:
+                    header_row = idx
+                    data_start_row = idx + 1
+                    break
+            
+            if header_row is None:
+                continue
+            
+            headers = df.iloc[header_row].values
+            col_map = {}
+            for i, h in enumerate(headers):
+                if pd.isna(h):
+                    continue
+                h_str = str(h).strip()
+                if 'День' in h_str:
+                    col_map['date'] = i
+                elif 'СЧА Методика' in h_str:
+                    col_map['scha_method'] = i
+                elif 'СЧА Баланс' in h_str:
+                    col_map['scha_balance'] = i
+                elif 'СЧА из П2' in h_str:
+                    col_map['scha_p2'] = i
+            
+            if 'date' not in col_map:
+                continue
+            
+            data_rows = []
+            for idx in range(data_start_row, len(df)):
+                row = df.iloc[idx]
+                
+                if all(pd.isna(v) for v in row.values):
+                    break
+                
+                date_val = row[col_map['date']] if col_map['date'] < len(row) else None
+                if pd.isna(date_val):
+                    continue
+                
+                try:
+                    if isinstance(date_val, (int, float)) and date_val > 40000:
+                        date_obj = pd.Timestamp.fromordinal(int(date_val) - 693594).date()
+                    else:
+                        date_obj = pd.to_datetime(date_val, format='%d.%m.%Y', errors='coerce').date()
+                    
+                    if date_obj is None or pd.isna(date_obj):
+                        continue
+                except:
+                    continue
+                
+                scha_value = None
+                if 'scha_method' in col_map and col_map['scha_method'] < len(row):
+                    val = row[col_map['scha_method']]
+                    if pd.notna(val) and isinstance(val, (int, float)):
+                        scha_value = val
+                
+                if scha_value is None and 'scha_balance' in col_map and col_map['scha_balance'] < len(row):
+                    val = row[col_map['scha_balance']]
+                    if pd.notna(val) and isinstance(val, (int, float)):
+                        scha_value = val
+                
+                if scha_value is None and 'scha_p2' in col_map and col_map['scha_p2'] < len(row):
+                    val = row[col_map['scha_p2']]
+                    if pd.notna(val) and isinstance(val, (int, float)):
+                        scha_value = val
+                
+                if scha_value is not None:
+                    data_rows.append({
+                        'Date': date_obj,
+                        sheet: scha_value
+                    })
+            
+            if data_rows:
+                df_sheet = pd.DataFrame(data_rows)
+                scha_data[sheet] = df_sheet
+        
+        if not scha_data:
+            return " Первая: нет данных СЧА ни в одном листе"
+        
+        scha_result = scha_data[sorted(scha_data.keys(), key=natural_sort_key)[0]]
+        for sheet in sorted(scha_data.keys(), key=natural_sort_key)[1:]:
+            scha_result = pd.merge(scha_result, scha_data[sheet], on='Date', how='outer')
+        
+        scha_result = scha_result.sort_values('Date').drop_duplicates(subset=['Date'])
+        scha_result['Date'] = pd.to_datetime(scha_result['Date'])
+        
+        output = r'\\fs-01.renlife.com\alldocs\Инвестиционный департамент\7.0 Treasury\25.Автоматизация\NaVi\NaViПервая_СЧА.xlsx'
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            scha_result.to_excel(writer, sheet_name='СЧА', index=False)
+            
+        return " Первая: успешно"
+        
+    except Exception as e:
+        return f" Первая: {str(e)[:150]}"
+
 def send_email(update_results, processing_results):
     """
     Отправляет email с результатами выполнения
@@ -321,10 +442,8 @@ def send_email(update_results, processing_results):
     mail.To = EMAIL_RECIPIENTS
     mail.Subject = f"Отчет по обработке СЧА от {datetime.now().strftime('%d.%m.%Y')}"
     
-    # Формируем тело письма
     body = f"Дата и время выполнения: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}\n\n"
     
-    # Этап 1: Обновление файлов
     body += "ЭТАП 1: Обновление исходных файлов\n"
     body += "-" * 40 + "\n"
     
@@ -346,7 +465,6 @@ def send_email(update_results, processing_results):
     
     body += "\n"
     
-    # Этап 2: Обработка компаний
     body += "ЭТАП 2: Обработка компаний\n"
     body += "-" * 40 + "\n"
     
@@ -375,11 +493,9 @@ def main():
     print("ЭТАП 1: ОБНОВЛЕНИЕ ИСХОДНЫХ ФАЙЛОВ")
     print("="*50)
     
-    # Очищаем папку назначения
     print("Очистка папки NAV for DI...")
     clear_folder(destination_folder)
     
-    # Создаем папку назначения, если её нет
     if not os.path.exists(destination_folder):
         os.makedirs(destination_folder)
     
@@ -397,7 +513,8 @@ def main():
     processing_results = [
         process_sputnik(),
         process_tkb(),
-        process_raif()
+        process_raif(),
+        process_first()
     ]
     
     for res in processing_results:
