@@ -74,6 +74,9 @@ def process_folder(target, source_root, destination_folder):
         return f"{short_name}: папка не найдена"
 
     for filename in os.listdir(folder_path):
+        if filename.startswith('~$'):
+            continue
+            
         if search_pattern.lower() in filename.lower():
             file_path = os.path.join(folder_path, filename)
             if os.path.isfile(file_path):
@@ -113,18 +116,27 @@ def natural_sort_key(sheet_name):
 def process_sputnik():
     """Обработка Спутник (файлы Вознаграждение)"""
     files = glob.glob(os.path.join(destination_folder, '**', '*Вознаграждение*.xls*'), recursive=True)
+    files = [f for f in files if not os.path.basename(f).startswith('~$')]
     if not files:
         return " Спутник: файлы не найдены"
     
     try:
-        excel_file = pd.ExcelFile(files[0])
+        if files[0].endswith('.xlsx'):
+            excel_file = pd.ExcelFile(files[0], engine='openpyxl')
+        else:
+            excel_file = pd.ExcelFile(files[0])
+            
         nav_data, inout_data = {}, {}
         
         for sheet in excel_file.sheet_names:
             if sheet == "ИТОГО":
                 continue
             
-            df = pd.read_excel(files[0], sheet_name=sheet)
+            if files[0].endswith('.xlsx'):
+                df = pd.read_excel(files[0], sheet_name=sheet, engine='openpyxl')
+            else:
+                df = pd.read_excel(files[0], sheet_name=sheet)
+                
             if 'Date' not in df.columns:
                 continue
             
@@ -176,16 +188,17 @@ def process_sputnik():
 def process_tkb():
     """Обработка ТКБ (Сводная РСА-СЧА)"""
     files = glob.glob(os.path.join(destination_folder, '**', '*Сводная РСА-СЧА*.xlsx'), recursive=True)
+    files = [f for f in files if not os.path.basename(f).startswith('~$')]
     if not files:
         return " ТКБ: файлы не найдены"
     
     try:
-        excel_file = pd.ExcelFile(files[0])
+        excel_file = pd.ExcelFile(files[0], engine='openpyxl')
         sheets = sorted(excel_file.sheet_names, key=natural_sort_key)
         scha_data, inout_data = {}, {}
         
         for sheet in sheets:
-            df = pd.read_excel(files[0], sheet_name=sheet, skiprows=6, header=None)
+            df = pd.read_excel(files[0], sheet_name=sheet, skiprows=6, header=None, engine='openpyxl')
             df = df.dropna(axis=1, how='all')
             
             if len(df.columns) == 7:
@@ -244,16 +257,17 @@ def process_tkb():
 def process_raif():
     """Обработка Райффайзен (Отчет по СЧА)"""
     files = glob.glob(os.path.join(destination_folder, '**', '*Отчет по СЧА*.xlsx'), recursive=True)
+    files = [f for f in files if not os.path.basename(f).startswith('~$')]
     if not files:
         return " Райф: файлы не найдены"
     
     try:
-        excel_file = pd.ExcelFile(files[0])
+        excel_file = pd.ExcelFile(files[0], engine='openpyxl')
         sheets = sorted(excel_file.sheet_names, key=natural_sort_key)
         scha_data, inout_data = {}, {}
         
         for sheet in sheets:
-            df = pd.read_excel(files[0], sheet_name=sheet, skiprows=6, header=None)
+            df = pd.read_excel(files[0], sheet_name=sheet, skiprows=6, header=None, engine='openpyxl')
             df = df.dropna(axis=1, how='all')
             
             if len(df.columns) != 5:
@@ -319,11 +333,13 @@ def process_raif():
 def process_first():
     """Обработка УК Первая (Сводная СЧА)"""
     files = glob.glob(os.path.join(destination_folder, '**', '*Сводная СЧА*.xlsx'), recursive=True)
+    files = [f for f in files if not os.path.basename(f).startswith('~$')]
+    
     if not files:
         return " Первая: файлы не найдены"
     
     try:
-        excel_file = pd.ExcelFile(files[0])
+        excel_file = pd.ExcelFile(files[0], engine='openpyxl')
         sheets = sorted(excel_file.sheet_names, key=natural_sort_key)
         
         scha_data = {}
@@ -332,7 +348,7 @@ def process_first():
             if sheet in ["ИТОГО", "Total", "Сводка"]:
                 continue
                 
-            df = pd.read_excel(files[0], sheet_name=sheet, header=None)
+            df = pd.read_excel(files[0], sheet_name=sheet, header=None, engine='openpyxl')
             
             header_row = None
             data_start_row = None
