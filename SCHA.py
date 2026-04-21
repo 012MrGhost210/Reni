@@ -2,18 +2,114 @@ import pandas as pd
 import os
 import glob
 import re
+import shutil
+from datetime import datetime
+import win32com.client as win32
 
+# --- НАСТРОЙКИ ДЛЯ ОБНОВЛЕНИЯ ---
+source_root = r"\\fs-01.renlife.com\alldocs\Инвестиционный департамент\7.0 Treasury\diadoc_connector\Документооборот завершён"
+destination_folder = r"\\fs-01.renlife.com\alldocs\Инвестиционный департамент\7.0 Treasury\25.Автоматизация\NAV for DI"
+
+# Соответствие папок: (путь, что_ищем, короткое_имя_для_вывода)
+TARGETS = [
+    {
+        "short_name": "Спутник",
+        "path": "7744000951-АО -УК -СПУТНИК - УПРАВЛЕНИЕ КАПИТАЛОМ-",
+        "search_pattern": "Вознаграждение"
+    },
+    {
+        "short_name": "Райф",
+        "path": "7702358512-ООО -УК Райффайзен-",
+        "search_pattern": "Отчет по СЧА"
+    },
+    {
+        "short_name": "ТКБ",
+        "path": "7825489723-ТКБ Инвестмент Партнерс (АО)",
+        "search_pattern": "Сводная РСА-СЧА"
+    }
+]
+
+# Настройки email
+EMAIL_RECIPIENTS = "Stepan.Koltsov@renlife.com; Ulyana.Pankratova@renlife.com; Aleksandra.Belousova@renlife.com"
+
+# --- ФУНКЦИИ ДЛЯ ОБНОВЛЕНИЯ ---
+def remove_text_in_braces(filename):
+    """Удаляет из имени файла все, что в фигурных скобках."""
+    new_name = re.sub(r'\{.*?\}', '', filename)
+    new_name = re.sub(r'\s+', ' ', new_name).strip()
+    return new_name
+
+def is_today(date):
+    """Проверяет, является ли дата сегодняшней."""
+    today = datetime.now().date()
+    return date.date() == today
+
+def clear_folder(folder_path):
+    """Очищает папку: удаляет все файлы и подпапки."""
+    if os.path.exists(folder_path):
+        for filename in os.listdir(folder_path):
+            file_path = os.path.join(folder_path, filename)
+            try:
+                if os.path.isfile(file_path) or os.path.islink(file_path):
+                    os.unlink(file_path)
+                elif os.path.isdir(file_path):
+                    shutil.rmtree(file_path)
+            except Exception as e:
+                print(f"  Ошибка при очистке {file_path}: {e}")
+
+def process_folder(target, source_root, destination_folder):
+    """Ищет САМЫЙ СВЕЖИЙ файл в конкретной подпапке, проверяет дату и копирует."""
+    folder_path = os.path.join(source_root, target["path"])
+    short_name = target["short_name"]
+    search_pattern = target["search_pattern"]
+    
+    matching_files = []
+
+    if not os.path.exists(folder_path):
+        return f"{short_name}: папка не найдена"
+
+    for filename in os.listdir(folder_path):
+        if search_pattern.lower() in filename.lower():
+            file_path = os.path.join(folder_path, filename)
+            if os.path.isfile(file_path):
+                mod_time = os.path.getmtime(file_path)
+                mod_date = datetime.fromtimestamp(mod_time)
+                matching_files.append((filename, mod_date, file_path))
+
+    if not matching_files:
+        return f"{short_name}: файлы не найдены"
+
+    matching_files.sort(key=lambda x: x[1], reverse=True)
+    latest_file, latest_date, latest_path = matching_files[0]
+
+    if not is_today(latest_date):
+        return f"{short_name}: самый свежий файл от {latest_date.date()}"
+
+    new_filename = remove_text_in_braces(latest_file)
+    destination_file = os.path.join(destination_folder, new_filename)
+
+    base, ext = os.path.splitext(new_filename)
+    counter = 1
+    while os.path.exists(destination_file):
+        destination_file = os.path.join(destination_folder, f"{base}_{counter}{ext}")
+        counter += 1
+
+    try:
+        shutil.copy2(latest_path, destination_file)
+        return f"{short_name}: скопирован"
+    except Exception as e:
+        return f"{short_name}: ошибка копирования"
+
+# --- ФУНКЦИИ ДЛЯ ОСНОВНОЙ ОБРАБОТКИ ---
 def natural_sort_key(sheet_name):
     return [int(text) if text.isdigit() else text.lower() 
             for text in re.split('([0-9]+)', sheet_name)]
 
-docs_path = r'\\fs-01.renlife.com\alldocs\Инвестиционный департамент\7.0 Treasury\25.Автоматизация\NAV for DI'
-
 def process_sputnik():
     """Обработка Спутник (файлы Вознаграждение)"""
-    files = glob.glob(os.path.join(docs_path, '**', '*Вознаграждение*.xls*'), recursive=True)
+    files = glob.glob(os.path.join(destination_folder, '**', '*Вознаграждение*.xls*'), recursive=True)
     if not files:
-        return "❌ Спутник: файлы не найдены"
+        return " Спутник: файлы не найдены"
     
     try:
         excel_file = pd.ExcelFile(files[0])
@@ -68,15 +164,15 @@ def process_sputnik():
             if inout_result is not None:
                 inout_result.to_excel(writer, sheet_name='InOut', index=False)
         
-        return "✅ Спутник: успешно"
+        return " Спутник: успешно"
     except Exception as e:
-        return f"❌ Спутник: {str(e)[:150]}"
+        return f" Спутник: {str(e)[:150]}"
 
 def process_tkb():
     """Обработка ТКБ (Сводная РСА-СЧА)"""
-    files = glob.glob(os.path.join(docs_path, '**', '*Сводная РСА-СЧА*.xlsx'), recursive=True)
+    files = glob.glob(os.path.join(destination_folder, '**', '*Сводная РСА-СЧА*.xlsx'), recursive=True)
     if not files:
-        return "❌ ТКБ: файлы не найдены"
+        return " ТКБ: файлы не найдены"
     
     try:
         excel_file = pd.ExcelFile(files[0])
@@ -136,15 +232,15 @@ def process_tkb():
             if inout_result is not None:
                 inout_result.to_excel(writer, sheet_name='InOut', index=False)
         
-        return "✅ ТКБ: успешно"
+        return " ТКБ: успешно"
     except Exception as e:
-        return f"❌ ТКБ: {str(e)[:150]}"
+        return f" ТКБ: {str(e)[:150]}"
 
 def process_raif():
     """Обработка Райффайзен (Отчет по СЧА)"""
-    files = glob.glob(os.path.join(docs_path, '**', '*Отчет по СЧА*.xlsx'), recursive=True)
+    files = glob.glob(os.path.join(destination_folder, '**', '*Отчет по СЧА*.xlsx'), recursive=True)
     if not files:
-        return "❌ Райф: файлы не найдены"
+        return " Райф: файлы не найдены"
     
     try:
         excel_file = pd.ExcelFile(files[0])
@@ -211,25 +307,111 @@ def process_raif():
             if inout_result is not None:
                 inout_result.to_excel(writer, sheet_name='InOut', index=False)
         
-        return "✅ Райф: успешно"
+        return " Райф: успешно"
     except Exception as e:
-        return f"❌ Райф: {str(e)[:150]}"
+        return f" Райф: {str(e)[:150]}"
 
-def main():
-    print("="*40)
-    print("ОБРАБОТКА КОМПАНИЙ")
-    print("="*40)
+def send_email(update_results, processing_results):
+    """
+    Отправляет email с результатами выполнения
+    """
+    outlook = win32.Dispatch('Outlook.Application')
+    mail = outlook.CreateItem(0)
     
-    results = [
+    mail.To = EMAIL_RECIPIENTS
+    mail.Subject = f"Отчет по обработке СЧА от {datetime.now().strftime('%d.%m.%Y')}"
+    
+    # Формируем тело письма
+    body = f"Дата и время выполнения: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}\n\n"
+    
+    # Этап 1: Обновление файлов
+    body += "ЭТАП 1: Обновление исходных файлов\n"
+    body += "-" * 40 + "\n"
+    
+    all_ok = True
+    failed_updates = []
+    
+    for res in update_results:
+        if "скопирован" in res:
+            body += f" {res}\n"
+        else:
+            body += f" {res}\n"
+            all_ok = False
+            failed_updates.append(res.split(":")[0])
+    
+    if all_ok:
+        body += "\n Все отчеты СЧА были обработаны (скопированы свежие файлы)\n"
+    else:
+        body += f"\n Не удалось найти отчеты: {', '.join(failed_updates)}\n"
+    
+    body += "\n"
+    
+    # Этап 2: Обработка компаний
+    body += "ЭТАП 2: Обработка компаний\n"
+    body += "-" * 40 + "\n"
+    
+    processing_error = False
+    for res in processing_results:
+        if "успешно" in res:
+            body += f" {res}\n"
+        else:
+            body += f" {res}\n"
+            processing_error = True
+    
+    if processing_error:
+        body += "\n ВНИМАНИЕ: Второй этап завершён с ошибкой. Просьба проверить отчеты СЧА вручную.\n"
+    
+    mail.Body = body
+    
+    try:
+        mail.Send()
+        print("\n Email успешно отправлен")
+    except Exception as e:
+        print(f"\n Ошибка при отправке email: {e}")
+
+# --- ОСНОВНАЯ ПРОГРАММА ---
+def main():
+    print("="*50)
+    print("ЭТАП 1: ОБНОВЛЕНИЕ ИСХОДНЫХ ФАЙЛОВ")
+    print("="*50)
+    
+    # Очищаем папку назначения
+    print("Очистка папки NAV for DI...")
+    clear_folder(destination_folder)
+    
+    # Создаем папку назначения, если её нет
+    if not os.path.exists(destination_folder):
+        os.makedirs(destination_folder)
+    
+    print("\nКопирование свежих файлов:")
+    update_results = []
+    for target in TARGETS:
+        result = process_folder(target, source_root, destination_folder)
+        print(f"  {result}")
+        update_results.append(result)
+    
+    print("\n" + "="*50)
+    print("ЭТАП 2: ОБРАБОТКА КОМПАНИЙ")
+    print("="*50)
+    
+    processing_results = [
         process_sputnik(),
         process_tkb(),
         process_raif()
     ]
     
-    print("\n" + "="*40)
-    print("РЕЗУЛЬТАТЫ:")
-    for res in results:
-        print(res)
+    for res in processing_results:
+        print(f"  {res}")
+    
+    print("\n" + "="*50)
+    print("ЭТАП 3: ОТПРАВКА EMAIL")
+    print("="*50)
+    
+    send_email(update_results, processing_results)
+    
+    print("\n" + "="*50)
+    print(" ВСЕ ЭТАПЫ ЗАВЕРШЕНЫ")
+    print("="*50)
 
 if __name__ == "__main__":
     main()
