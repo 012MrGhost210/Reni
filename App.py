@@ -5,6 +5,8 @@ import os
 import locale
 import time
 from datetime import datetime, timedelta
+import pandas as pd
+from openpyxl import load_workbook
 
 # Настройка страницы
 st.set_page_config(
@@ -30,6 +32,11 @@ EXTRA_SCRIPTS_CONFIG = {
     "zaprosstavok.py": "📨 Запрос ставок",
     "stop.py": "❌ Убрать заглушку"
 }
+
+# ==================== 🐉 КОНФИГУРАЦИЯ ДЛЯ ПРОСМОТРА РЕКВИЗИТОВ ====================
+# Путь к файлу с реквизитами компаний
+COMPANY_DATA_PATH = r"C:\Users\ytggf\OneDrive\Документы\renlife\Сводные ааааа\ff\Реквизиты.xlsx"
+# =============================================================================
 
 # ==================== НАСТРОЙКИ ТАЙМАУТОВ ====================
 # Можно настроить для каждого скрипта индивидуально (в секундах)
@@ -67,6 +74,124 @@ if 'last_click_time' not in st.session_state:
 
 if 'button_cooldown' not in st.session_state:
     st.session_state.button_cooldown = {}
+
+# ==================== 🐉 ФУНКЦИИ ДЛЯ ПРОСМОТРА РЕКВИЗИТОВ ====================
+@st.cache_data(ttl=300)  # Кешируем данные на 5 минут
+def load_companies_data(excel_path):
+    """Загружает данные о компаниях из Excel файла"""
+    if not os.path.exists(excel_path):
+        return None, f"❌ Файл не найден по пути:\n{excel_path}"
+    
+    try:
+        workbook = load_workbook(excel_path, data_only=True)
+        sheet = workbook.active
+        
+        companies = []
+        max_col = sheet.max_column
+        
+        for col_idx in range(1, max_col + 1):
+            company_name = sheet.cell(row=5, column=col_idx).value
+            if company_name and str(company_name).strip():
+                # Собираем данные с 6 строки
+                data = []
+                for row_idx in range(6, sheet.max_row + 1):
+                    cell_value = sheet.cell(row=row_idx, column=col_idx).value
+                    if cell_value is not None and str(cell_value).strip():
+                        data.append(str(cell_value))
+                
+                companies.append({
+                    "name": str(company_name).strip(),
+                    "data": data
+                })
+        
+        if not companies:
+            return None, "❌ Не найдено компаний в 5-й строке столбцов"
+        
+        return companies, None
+        
+    except Exception as e:
+        return None, f"❌ Ошибка чтения Excel:\n{str(e)}"
+
+def show_companies_viewer():
+    """Отображает интерфейс просмотра реквизитов компаний"""
+    st.markdown("### 🏢 Просмотр реквизитов компаний")
+    
+    # Загружаем данные
+    companies, error = load_companies_data(COMPANY_DATA_PATH)
+    
+    if error:
+        st.error(error)
+        st.info(f"📁 Проверьте путь к файлу:\n`{COMPANY_DATA_PATH}`")
+        return
+    
+    if not companies:
+        st.warning("Нет данных для отображения")
+        return
+    
+    # Создаем выпадающий список компаний
+    company_names = [c["name"] for c in companies]
+    
+    # Выбор компании
+    selected_company = st.selectbox(
+        "📋 Выберите компанию:",
+        options=company_names,
+        key="company_selector"
+    )
+    
+    # Находим выбранную компанию
+    current_company = next((c for c in companies if c["name"] == selected_company), None)
+    
+    if current_company:
+        # Показываем информацию о компании
+        col1, col2 = st.columns([3, 1])
+        
+        with col1:
+            st.markdown(f"### 🏷️ {current_company['name']}")
+        
+        with col2:
+            # Кнопка копирования всех данных
+            if current_company["data"]:
+                if st.button("📋 Копировать все данные", key="copy_all_data", use_container_width=True):
+                    text_to_copy = "\n".join(current_company["data"])
+                    st.write("✅ Данные скопированы в буфер обмена!")
+                    st.code(text_to_copy, language="text")
+                    # Для реального копирования в буфер обмена используем JS
+                    st.markdown(
+                        f"""
+                        <script>
+                        function copyToClipboard() {{
+                            const text = `{text_to_copy.replace('`', '\\`')}`;
+                            navigator.clipboard.writeText(text);
+                        }}
+                        copyToClipboard();
+                        </script>
+                        """,
+                        unsafe_allow_html=True
+                    )
+        
+        st.markdown("---")
+        
+        # Отображаем данные
+        if current_company["data"]:
+            st.markdown("#### 📄 Реквизиты компании:")
+            
+            # Создаем DataFrame для красивого отображения
+            df = pd.DataFrame({
+                "№": range(1, len(current_company["data"]) + 1),
+                "Данные": current_company["data"]
+            })
+            st.dataframe(df, use_container_width=True, hide_index=True)
+            
+            # Альтернативное отображение в виде текста
+            with st.expander("📝 Показать в текстовом виде"):
+                text_content = "\n".join([f"{i}. {item}" for i, item in enumerate(current_company["data"], 1)])
+                st.code(text_content, language="text")
+        else:
+            st.info("⚠️ Нет данных для этой компании (ниже 5-й строки нет заполненных ячеек)")
+        
+        # Статистика
+        st.caption(f"📊 Всего записей: {len(current_company['data'])}")
+# =============================================================================
 
 # Функция для проверки таймаута кнопки
 def is_button_on_cooldown(button_key, cooldown_seconds):
@@ -149,8 +274,8 @@ def run_script(script_path):
             'error': f'Ошибка запуска: {str(e)}'
         }
 
-# Создаем вкладки для двух групп скриптов
-tab1, tab2 = st.tabs(["📋 Основные скрипты", "🔧 Дополнительные скрипты"])
+# 🐉 СОЗДАЕМ ТРИ ВКЛАДКИ (было две, добавили третью)
+tab1, tab2, tab3 = st.tabs(["📋 Основные скрипты", "🔧 Дополнительные скрипты", "🏢 Реквизиты компаний"])
 
 # === Вкладка 1: Основные скрипты ===
 with tab1:
@@ -373,6 +498,10 @@ with tab2:
             
             with results_area.container():
                 st.code(all_output)
+
+# 🐉 === Вкладка 3: Реквизиты компаний (НОВАЯ) ===
+with tab3:
+    show_companies_viewer()
 
 # Инструкция для пользователей
 with st.sidebar:
