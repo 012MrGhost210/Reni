@@ -33,7 +33,7 @@ EXTRA_SCRIPTS_CONFIG = {
     "stop.py": "❌ Убрать заглушку"
 }
 
-# ==================== 🐉 КОНФИГУРАЦИЯ ДЛЯ ПРОСМОТРА РЕКВИЗИТОВ ====================
+# ==================== КОНФИГУРАЦИЯ ДЛЯ ПРОСМОТРА РЕКВИЗИТОВ ====================
 # Путь к файлу с реквизитами компаний
 COMPANY_DATA_PATH = r"C:\Users\ytggf\OneDrive\Документы\renlife\Сводные ааааа\ff\Реквизиты.xlsx"
 # =============================================================================
@@ -75,7 +75,7 @@ if 'last_click_time' not in st.session_state:
 if 'button_cooldown' not in st.session_state:
     st.session_state.button_cooldown = {}
 
-# ==================== 🐉 ФУНКЦИИ ДЛЯ ПРОСМОТРА РЕКВИЗИТОВ ====================
+# ==================== ФУНКЦИИ ДЛЯ ПРОСМОТРА РЕКВИЗИТОВ ====================
 @st.cache_data(ttl=300)  # Кешируем данные на 5 минут
 def load_companies_data(excel_path):
     """Загружает данные о компаниях из Excel файла"""
@@ -153,21 +153,9 @@ def show_companies_viewer():
             if current_company["data"]:
                 if st.button("📋 Копировать все данные", key="copy_all_data", use_container_width=True):
                     text_to_copy = "\n".join(current_company["data"])
-                    st.write("✅ Данные скопированы в буфер обмена!")
-                    st.code(text_to_copy, language="text")
-                    # Для реального копирования в буфер обмена используем JS
-                    st.markdown(
-                        f"""
-                        <script>
-                        function copyToClipboard() {{
-                            const text = `{text_to_copy.replace('`', '\\`')}`;
-                            navigator.clipboard.writeText(text);
-                        }}
-                        copyToClipboard();
-                        </script>
-                        """,
-                        unsafe_allow_html=True
-                    )
+                    # Копируем в буфер обмена через text_area
+                    st.text_area("Скопируйте данные (Ctrl+C):", text_to_copy, height=100)
+                    st.success("✅ Данные готовы для копирования!")
         
         st.markdown("---")
         
@@ -274,7 +262,7 @@ def run_script(script_path):
             'error': f'Ошибка запуска: {str(e)}'
         }
 
-# 🐉 СОЗДАЕМ ТРИ ВКЛАДКИ (было две, добавили третью)
+# СОЗДАЕМ ТРИ ВКЛАДКИ
 tab1, tab2, tab3 = st.tabs(["📋 Основные скрипты", "🔧 Дополнительные скрипты", "🏢 Реквизиты компаний"])
 
 # === Вкладка 1: Основные скрипты ===
@@ -499,7 +487,7 @@ with tab2:
             with results_area.container():
                 st.code(all_output)
 
-# 🐉 === Вкладка 3: Реквизиты компаний (НОВАЯ) ===
+# === Вкладка 3: Реквизиты компаний ===
 with tab3:
     show_companies_viewer()
 
