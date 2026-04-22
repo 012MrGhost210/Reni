@@ -1,5 +1,3 @@
-# streamlit_app.py
-
 import streamlit as st
 import subprocess
 import sys
@@ -23,13 +21,13 @@ MAIN_SCRIPTS_CONFIG = {
     "INDEX.py": "📊 Обновление индексов",
     "simple.py": "📁 Скопировать файл Daily Income 2026",
     "OSVRG.py": "🎯ОСВ",
+    "check.py": "⚙️ Проверить наличие актуальных файлов в диадоке",
     "SCHA.py": "✅СЧА для ИД РЖ"
 }
 
 # Дополнительная группа скриптов
 EXTRA_SCRIPTS_CONFIG = {
     "zaprosstavok.py": "📨 Запрос ставок",
-    "check.py": "⚙️ Проверить наличие актуальных файлов в диадоке",
     "stop.py": "❌ Убрать заглушку"
 }
 
@@ -37,17 +35,17 @@ EXTRA_SCRIPTS_CONFIG = {
 # Можно настроить для каждого скрипта индивидуально (в секундах)
 SCRIPT_TIMEOUTS = {
     # Основные скрипты
-    "SFT.py": 5,
+    "SFT.py": 0,
     "rusfar.py": 5,
     "INDEX.py": 5,
-    "simple.py": 5,
+    "simple.py": 0,
     "OSVRG.py": 5,
-    "SCHA.py": 5,
+    "check.py": 0,
+    "SCHA.py": 40,
     
     # Дополнительные скрипты
     "zaprosstavok.py": 5,
-    "check.py": 5,
-    "stop.py": 5,
+    "stop.py": 300,
 }
 
 # Таймаут по умолчанию, если скрипт не указан в SCRIPT_TIMEOUTS
