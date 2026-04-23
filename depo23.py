@@ -174,8 +174,10 @@ def save_to_registry(deposits_data, total_amount):
 
 def update_available_balance():
     """Обновляет отображение доступной суммы на основе текущего баланса и платежей"""
+    global available_balance_label, remaining_label
+    
     if not hasattr(root, 'initial_balance'):
-        if 'available_balance_label' in globals() and available_balance_label:
+        if available_balance_label is not None:
             available_balance_label.config(text="Доступно для размещения: сначала загрузите баланс")
         return
     
@@ -188,7 +190,7 @@ def update_available_balance():
     available = root.initial_balance - payment_amount - 10000
     available = max(0, available)
     
-    if 'available_balance_label' in globals() and available_balance_label:
+    if available_balance_label is not None:
         available_balance_label.config(text=f"Доступно для размещения: {format_number(available)}")
     
     # Обновляем остаток после распределения
@@ -198,6 +200,8 @@ def update_available_balance():
 
 def update_remaining_balance():
     """Обновляет отображение остатка после введенных сумм депозитов"""
+    global remaining_label
+    
     if not hasattr(root, 'initial_balance'):
         return
     
@@ -224,7 +228,7 @@ def update_remaining_balance():
     remaining = available - total_deposits
     remaining = max(0, remaining)
     
-    if 'remaining_label' in globals() and remaining_label:
+    if remaining_label is not None:
         if remaining == 0 and total_deposits > 0:
             remaining_label.config(text=f"Остаток: {format_number(remaining)} (✓ всё распределено)", fg="green")
         elif remaining > 0:
@@ -306,6 +310,8 @@ def auto_fill_deposits(mode='equal'):
 
 def on_deposit_count_change(*args):
     """Обработчик изменения количества депозитов"""
+    global entry_payment, entry_rate, entry_date, deposit_entries, available_balance_label, remaining_label
+    
     count = deposit_count.get()
     
     # Очищаем старые поля
@@ -319,7 +325,6 @@ def on_deposit_count_change(*args):
     payments_frame = tk.Frame(deposit_fields_frame)
     payments_frame.pack(fill=tk.X, pady=(0, 10))
     
-    global entry_payment
     entry_payment = tk.Entry(payments_frame, width=30)
     entry_payment.pack(side=tk.LEFT, padx=(0, 10))
     
@@ -331,22 +336,19 @@ def on_deposit_count_change(*args):
     if count == "1":
         # Поля для одного депозита
         tk.Label(deposit_fields_frame, text="Ставка (%):").pack(anchor=tk.W)
-        global entry_rate
         entry_rate = tk.Entry(deposit_fields_frame, width=30)
         entry_rate.pack(fill=tk.X, pady=(5, 10))
         
         tk.Label(deposit_fields_frame, text="Срок до (дата):").pack(anchor=tk.W)
         tk.Label(deposit_fields_frame, text="Формат: ДД.ММ.ГГГГ (например: 31.12.2024)", 
                  fg="gray", font=("Arial", 8)).pack(anchor=tk.W)
-        global entry_date
         entry_date = tk.Entry(deposit_fields_frame, width=30)
         entry_date.pack(fill=tk.X, pady=(5, 10))
         
-        # Скрываем переменные для нескольких депозитов, если они есть
-        if 'available_balance_label' in globals() and available_balance_label:
-            available_balance_label.pack_forget()
-        if 'remaining_label' in globals() and remaining_label:
-            remaining_label.pack_forget()
+        # Обнуляем переменные для нескольких депозитов
+        available_balance_label = None
+        remaining_label = None
+        deposit_entries = []
         
     else:
         # Поля для нескольких депозитов
@@ -359,7 +361,6 @@ def on_deposit_count_change(*args):
         balance_frame = tk.Frame(deposit_fields_frame, bg="#E3F2FD", relief=tk.GROOVE, bd=1)
         balance_frame.pack(fill=tk.X, pady=(0, 10))
         
-        global available_balance_label, remaining_label
         available_balance_label = tk.Label(balance_frame, text="Доступно для размещения: 0", 
                                            font=("Arial", 11, "bold"), fg="green", bg="#E3F2FD")
         available_balance_label.pack(pady=(5, 2))
@@ -386,7 +387,6 @@ def on_deposit_count_change(*args):
                  font=("Arial", 10, "bold")).pack(anchor=tk.W, pady=(10, 10))
         
         # Создаем поля для каждого депозита
-        global deposit_entries
         deposit_entries = []
         
         # Фрейм для списка депозитов
@@ -404,7 +404,7 @@ def on_deposit_count_change(*args):
             entry_amount_dep = tk.Entry(dep_frame, width=30)
             entry_amount_dep.pack(fill=tk.X, pady=(2, 5))
             # Привязываем событие изменения для пересчета остатка
-            entry_amount_dep.bind('<KeyRelease>', lambda e, idx=i: update_remaining_balance())
+            entry_amount_dep.bind('<KeyRelease>', lambda e: update_remaining_balance())
             
             # Ставка
             tk.Label(dep_frame, text="Ставка (%):").pack(anchor=tk.W)
@@ -483,6 +483,8 @@ def add_tracked_payments():
 
 def process_calculation():
     """Основная функция обработки"""
+    global available_balance_label, remaining_label
+    
     try:
         # Проверяем существование файла 1
         if not os.path.exists(FILE1_PATH):
@@ -510,7 +512,7 @@ def process_calculation():
             label_balance.config(text=f"Найденный баланс: {format_number(initial_balance)}")
             
             # Если выбрано несколько депозитов, обновляем доступную сумму
-            if deposit_count.get() != "1" and 'available_balance_label' in globals() and available_balance_label:
+            if deposit_count.get() != "1" and available_balance_label is not None:
                 update_available_balance()
             
         except Exception as e:
