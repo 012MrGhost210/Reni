@@ -283,19 +283,36 @@ def auto_fill_deposits(mode='equal'):
                            f"Первому депозиту добавлен остаток: {format_number(remainder)}")
         
     elif mode == 'main':
-        # Основной депозит получает все, остальные по 1000
-        main_amount = available - (1000 * (count - 1))
-        main_amount = max(0, int(main_amount / 1000) * 1000)  # Округляем до тысяч вниз
-        
-        if main_amount < 0:
-            messagebox.showerror("Ошибка", "Сумма слишком мала для распределения")
+        # Получаем минимальную сумму для дополнительных депозитов
+        try:
+            min_amount = parse_number(entry_min_amount.get().strip())
+            if min_amount <= 0:
+                raise ValueError
+        except:
+            messagebox.showerror("Ошибка", "Введите корректную минимальную сумму для дополнительных депозитов")
             return
+        
+        # Основной депозит получает всё, остальные по указанной сумме
+        main_amount = available - (min_amount * (count - 1))
+        
+        if main_amount < min_amount:
+            messagebox.showerror("Ошибка", 
+                               f"Сумма слишком мала для распределения!\n"
+                               f"Требуется минимум: {format_number(min_amount * count)}")
+            return
+        
+        # Округляем основную сумму до тысяч вниз
+        main_amount = int(main_amount / 1000) * 1000
+        
+        if main_amount < min_amount:
+            # Если после округления стало меньше, корректируем
+            main_amount = min_amount
         
         for i, deposit in enumerate(deposit_entries):
             if i == 0:
                 amount = main_amount
             else:
-                amount = 1000
+                amount = min_amount
             
             deposit['amount'].delete(0, tk.END)
             deposit['amount'].insert(0, str(amount).replace('.', ','))
@@ -303,14 +320,11 @@ def auto_fill_deposits(mode='equal'):
         messagebox.showinfo("Готово", 
                            f"Сумма {format_number(available)} распределена:\n"
                            f"Депозит 1 (основной): {format_number(main_amount)}\n"
-                           f"Остальные {count-1} депозитов: по 1 000")
-    
-    # Обновляем остаток
-    update_remaining_balance()
+                           f"Остальные {count-1} депозитов: по {format_number(min_amount)}")
 
 def on_deposit_count_change(*args):
     """Обработчик изменения количества депозитов"""
-    global entry_payment, entry_rate, entry_date, deposit_entries, available_balance_label, remaining_label
+    global entry_payment, entry_rate, entry_date, deposit_entries, available_balance_label, remaining_label, entry_min_amount
     
     count = deposit_count.get()
     
@@ -369,6 +383,17 @@ def on_deposit_count_change(*args):
                                    font=("Arial", 10), fg="blue", bg="#E3F2FD")
         remaining_label.pack(pady=(0, 5))
         
+        # Фрейм для настройки минимальной суммы
+        min_amount_frame = tk.Frame(deposit_fields_frame)
+        min_amount_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        tk.Label(min_amount_frame, text="Минимальная сумма для дополнительных депозитов:", 
+                font=("Arial", 9)).pack(side=tk.LEFT, padx=(0, 10))
+        entry_min_amount = tk.Entry(min_amount_frame, width=15)
+        entry_min_amount.insert(0, "1 000")  # Значение по умолчанию
+        entry_min_amount.pack(side=tk.LEFT)
+        tk.Label(min_amount_frame, text="руб.", font=("Arial", 9)).pack(side=tk.LEFT, padx=(5, 0))
+        
         # Кнопки для автоматического заполнения
         auto_frame = tk.Frame(deposit_fields_frame)
         auto_frame.pack(fill=tk.X, pady=(0, 10))
@@ -378,7 +403,7 @@ def on_deposit_count_change(*args):
                              bg="#4CAF50", fg="white", font=("Arial", 9, "bold"))
         btn_equal.pack(side=tk.LEFT, padx=(0, 10))
         
-        btn_main = tk.Button(auto_frame, text="⭐ Основной + остальные по 1000", 
+        btn_main = tk.Button(auto_frame, text="⭐ Основной + остальные по минимальной сумме", 
                             command=lambda: auto_fill_deposits('main'),
                             bg="#FF9800", fg="white", font=("Arial", 9, "bold"))
         btn_main.pack(side=tk.LEFT)
@@ -670,7 +695,7 @@ def confirm_deposits():
 # Создаем графический интерфейс
 root = tk.Tk()
 root.title("Расчет депозитов ГПБ")
-root.geometry("700x750")
+root.geometry("750x800")
 
 # СОЗДАЕМ ГЛАВНЫЙ КОНТЕЙНЕР С ПРОКРУТКОЙ
 main_canvas = tk.Canvas(root)
@@ -701,7 +726,7 @@ frame_info = tk.Frame(scrollable_frame)
 frame_info.pack(pady=10, padx=20, fill=tk.X)
 
 tk.Label(frame_info, text=f"Файл баланса: {FILE1_PATH}", 
-         wraplength=600, justify=tk.LEFT, fg="blue").pack(anchor=tk.W)
+         wraplength=650, justify=tk.LEFT, fg="blue").pack(anchor=tk.W)
 
 label_balance = tk.Label(frame_info, text="Баланс: не загружен", fg="red")
 label_balance.pack(anchor=tk.W, pady=(5, 0))
@@ -731,6 +756,7 @@ entry_date = None
 deposit_entries = []
 available_balance_label = None
 remaining_label = None
+entry_min_amount = None
 
 # Инициализируем поля для одного депозита
 on_deposit_count_change()
@@ -749,7 +775,7 @@ btn_confirm.pack(pady=5)
 
 # Поле для результата
 tk.Label(scrollable_frame, text="Результат:").pack(anchor=tk.W, padx=20)
-result_text = tk.Text(scrollable_frame, height=12, width=75, font=("Arial", 10))
+result_text = tk.Text(scrollable_frame, height=12, width=80, font=("Arial", 10))
 result_text.pack(pady=10, padx=20, fill=tk.BOTH, expand=True)
 
 # Добавляем скроллбар для текста
@@ -766,7 +792,8 @@ instruction = """
    для автоматического добавления платежей от ПОЧТА РОССИИ к текущей сумме)
 3. Нажмите "Сформировать сообщение" для загрузки баланса
 4. Для нескольких депозитов:
-   • Используйте кнопки "Распределить поровну" или "Основной + остальные по 1000"
+   • Укажите минимальную сумму для дополнительных депозитов (по умолчанию 1 000 руб.)
+   • Используйте кнопку "Распределить поровну" или "Основной + остальные по минимальной сумме"
    • При необходимости скорректируйте суммы вручную
    • Заполните ставки и даты для каждого депозита
 5. Снова нажмите "Сформировать сообщение" для финального расчета
