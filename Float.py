@@ -19,7 +19,6 @@ year = yesterday.year
 month = f'{yesterday.month:02d}'
 day = f'{yesterday.day:02d}'
 date_str = f'{year}-{month}-{day}'
-sheet_name = f'Bonds_{year}{month}{day}'
 
 # Формируем URL
 zip_url = f'https://iss.moex.com/iss/downloads/engines/stock/markets/bonds/sessions/main/years/{year}/months/{month}/days/{day}/securities_moex_stock_bonds_main_{year}_{month}_{day}.csv.zip'
@@ -48,15 +47,14 @@ if auth_response.status_code == 200:
                         except (ValueError, AttributeError):
                             pass
 
-        # Сохраняем полный файл как CSV
+        # Сохраняем полный файл как CSV (промежуточный)
         df.to_csv(source_zip_path, index=False, sep=';', decimal='.', encoding='cp1251')
         print(f"Полные данные сохранены: {source_zip_path}")
         print(f"Всего записей: {len(df)}")
 
-        # 2. Загружаем список ISIN из Excel
+        # Загружаем список ISIN из Excel
         try:
             isin_df = pd.read_excel(isin_list_path)
-            # Ищем столбец с названием ISIN (заглавными)
             if 'ISIN' in isin_df.columns:
                 isin_list = isin_df['ISIN'].dropna().astype(str).str.upper().tolist()
                 print(f"Загружено {len(isin_list)} ISIN из файла: {isin_list_path}")
@@ -71,65 +69,60 @@ if auth_response.status_code == 200:
             print(f"Ошибка при чтении списка ISIN: {e}")
             isin_list = []
 
-        # 3. Фильтруем данные по ISIN
+        # Фильтруем данные по ISIN
         if isin_list and 'ISIN' in df.columns:
             df['ISIN'] = df['ISIN'].astype(str).str.upper()
-            filtered_df = df[df['ISIN'].isin(isin_list)]
+            filtered_df = df[df['ISIN'].isin(isin_list)].copy()  # .copy() чтобы не было warning
             
             print(f"Отфильтровано записей по ISIN: {len(filtered_df)}")
             
-            # Добавляем колонку с датой данных
-            filtered_df['Дата_данных'] = date_str
+            # Добавляем колонку с датой данных (первой колонкой)
+            filtered_df.insert(0, 'Дата_данных', date_str)
             
-            # 4. Сохраняем в Excel с накоплением истории
+            # Сохраняем в Excel с добавлением строк в конец
             if not filtered_df.empty:
                 if os.path.exists(output_excel_path):
-                    # Файл существует - добавляем новый лист
-                    with pd.ExcelWriter(output_excel_path, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
-                        filtered_df.to_excel(writer, sheet_name=sheet_name, index=False)
+                    # Файл существует - читаем старые данные и объединяем
+                    existing_df = pd.read_excel(output_excel_path)
+                    print(f"Существующий файл содержит {len(existing_df)} записей")
                     
-                    # Обновляем историю загрузок
-                    try:
-                        history_df = pd.read_excel(output_excel_path, sheet_name='История_загрузок')
-                    except:
-                        history_df = pd.DataFrame()
+                    # Объединяем старые и новые данные
+                    combined_df = pd.concat([existing_df, filtered_df], ignore_index=True)
+                    print(f"После добавления стало {len(combined_df)} записей")
                     
-                    new_history = pd.DataFrame({
-                        'Дата_загрузки': [datetime.now().strftime('%Y-%m-%d %H:%M:%S')],
-                        'Дата_данных': [date_str],
-                        'Количество_записей': [len(filtered_df)],
-                        'Лист': [sheet_name]
-                    })
-                    
-                    updated_history = pd.concat([history_df, new_history], ignore_index=True)
-                    
-                    with pd.ExcelWriter(output_excel_path, engine='openpyxl', mode='a', if_sheet_exists='replace') as writer:
-                        updated_history.to_excel(writer, sheet_name='История_загрузок', index=False)
-                    
-                    print(f"Данные ДОБАВЛЕНЫ новым листом '{sheet_name}'")
+                    # Сохраняем объединенный файл
+                    combined_df.to_excel(output_excel_path, index=False)
+                    print(f"Данные ДОБАВЛЕНЫ в конец файла (дата {date_str})")
                 else:
-                    # Создаем новый файл
-                    with pd.ExcelWriter(output_excel_path, engine='openpyxl') as writer:
-                        filtered_df.to_excel(writer, sheet_name=sheet_name, index=False)
-                        history_df = pd.DataFrame({
-                            'Дата_загрузки': [datetime.now().strftime('%Y-%m-%d %H:%M:%S')],
-                            'Дата_данных': [date_str],
-                            'Количество_записей': [len(filtered_df)],
-                            'Лист': [sheet_name]
-                        })
-                        history_df.to_excel(writer, sheet_name='История_загрузок', index=False)
-                    print(f"Создан новый файл с листом '{sheet_name}'")
+                    # Файл не существует - создаем новый
+                    filtered_df.to_excel(output_excel_path, index=False)
+                    print(f"Создан новый файл с данными за {date_str}")
                 
                 print(f"Сохранено в: {output_excel_path}")
             else:
                 print(f"Внимание: Нет данных для указанных ISIN за {date_str}")
+                
+                # Даже если данных нет, фиксируем факт запроса
+                no_data_row = pd.DataFrame({
+                    'Дата_данных': [date_str],
+                    'ISIN': ['НЕТ ДАННЫХ'],
+                    'Примечание': ['По указанным ISIN данные не найдены']
+                })
+                
+                if os.path.exists(output_excel_path):
+                    existing_df = pd.read_excel(output_excel_path)
+                    combined_df = pd.concat([existing_df, no_data_row], ignore_index=True)
+                    combined_df.to_excel(output_excel_path, index=False)
+                    print(f"Зафиксирован факт отсутствия данных за {date_str}")
         else:
             if 'ISIN' not in df.columns:
                 print(f"Ошибка: В скачанных данных нет колонки 'ISIN'")
+                print(f"Доступные колонки: {df.columns.tolist()}")
             else:
                 print("Список ISIN пуст, фильтрация не выполнена")
 
     else:
         print(f"Ошибка при скачивании архива: {response.status_code}")
+        print(f"URL: {zip_url}")
 else:
     print(f"Ошибка авторизации: {auth_response.status_code}")
