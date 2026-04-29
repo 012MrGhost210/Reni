@@ -47,3 +47,6 @@ if auth_response.status_code == 200:
         print(f"Ошибка при скачивании архива: {response.status_code}")
 else:
     print(f"Ошибка авторизации: {auth_response.status_code}")
+
+
+https://iss.moex.com/iss/downloads/engines/stock/markets/bonds/sessions/main/years/2026/months/04/days/24/securities_moex_stock_bonds_main_2026_04_24.csv.zip
