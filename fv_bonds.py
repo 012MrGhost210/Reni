@@ -6,13 +6,20 @@ from datetime import datetime, timedelta
 
 login = ''
 password = ''
-file_path = 'M:\Финансовый департамент\Treasury\Базы данных(автоматизация)\DI_DATABASE\FV\processed_moex_data_month.csv'
-month = datetime.now().month-1
+file_path = r'M:\Финансовый департамент\Treasury\Базы данных(автоматизация)\DI_DATABASE\FV\processed_moex_data_month.csv'
+month = datetime.now().month - 1
 month_form = f'{month:02d}'
-yesterday = datetime.now().day-1
-year=datetime.now().year
+yesterday = datetime.now().day - 1
+year = datetime.now().year
 
 zip_url = f'https://iss.moex.com/iss/downloads/engines/stock/markets/bonds/years/2026/months/{month_form}/securities_moex_stock_bonds_2026_{month_form}.csv.zip'
+
+# Список нужных столбцов
+required_columns = [
+    'ISIN', 'BOARDNAME', 'SHORTNAME', 'REGNUMBER', 'MATDATE',
+    'FACEVALUE', 'CURRENCYID', 'WAPRICE', 'HIGHBID', 'LOWOFFER',
+    'BID', 'OFFER', 'ACCINT', 'MARKETPRICE3'
+]
 
 session = requests.Session()
 auth_response = session.get('https://passport.moex.com/authenticate', auth=(login, password))
@@ -30,6 +37,10 @@ if auth_response.status_code == 200:
             with zip_file.open(file_name_in_zip) as csv_file:
                 df = pd.read_csv(csv_file, sep=';', decimal=',', encoding='cp1251', skiprows=2)
 
+                # Оставляем только нужные столбцы, которые есть в DataFrame
+                existing_columns = [col for col in required_columns if col in df.columns]
+                df = df[existing_columns]
+
                 for col in df.columns:
                     if df[col].dtype == 'object':
                         try:
@@ -42,11 +53,10 @@ if auth_response.status_code == 200:
         output_file = file_path
         df.to_csv(output_file, index=False, sep=';', decimal='.', encoding='cp1251')
         print(f"Файл сохранён как: processed_moex_data_month")
+        print(f"Оставлены столбцы: {existing_columns}")
 
     else:
         print(f"Ошибка при скачивании архива: {response.status_code}")
 else:
     print(f"Ошибка авторизации: {auth_response.status_code}")
-
-ISIN	BOARDNAME	SHORTNAME	REGNUMBER	MATDATE	FACEVALUE	CURRENCYID	WAPRICE	HIGHBID	LOWOFFER	BID	OFFER	ACCINT	MARKETPRICE3
 
