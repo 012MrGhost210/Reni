@@ -47,3 +47,6 @@ if auth_response.status_code == 200:
         print(f"Ошибка при скачивании архива: {response.status_code}")
 else:
     print(f"Ошибка авторизации: {auth_response.status_code}")
+
+ISIN	BOARDNAME	SHORTNAME	REGNUMBER	MATDATE	FACEVALUE	CURRENCYID	WAPRICE	HIGHBID	LOWOFFER	BID	OFFER	ACCINT	MARKETPRICE3
+
