@@ -4,6 +4,7 @@ from pathlib import Path
 import shutil
 from datetime import datetime
 import re
+import numpy as np
 
 def clean_filename(filename):
     """
@@ -21,6 +22,20 @@ def clean_filename(filename):
         cleaned_name = re.sub(r'[_\-\.]+$', '', cleaned_name)
         return f"{cleaned_name}.{ext}"
     return filename
+
+def round_numeric_values(df):
+    """
+    Округляет все числовые значения в DataFrame до целых чисел
+    """
+    for col in df.columns:
+        for row in range(len(df)):
+            val = df.iloc[row, col]
+            if pd.notna(val) and isinstance(val, (int, float)):
+                # Если значение не NaN и является числом
+                if not isinstance(val, bool):  # Не трогаем boolean значения
+                    # Округляем до целого числа
+                    df.iloc[row, col] = round(val)
+    return df
 
 def process_report(file_path, output_dir):
     """
@@ -47,7 +62,7 @@ def process_report(file_path, output_dir):
     empty_row = pd.DataFrame([[''] * df.shape[1]], columns=df.columns)
     df_new = pd.concat([empty_row, df], ignore_index=True)
     
-    # 2. Меняем название на "СоВ" в B2 (строка 2, колонка 2)
+    # 2. Меняем название на нужное в B2 (строка 2, колонка 2)
     if df_new.shape[0] > 1 and df_new.shape[1] > 1:
         old_value = df_new.iloc[1, 1]
         if pd.notna(old_value):
@@ -65,7 +80,11 @@ def process_report(file_path, output_dir):
                         df_new.iloc[i, j] = "Сводный отчет по портфелям УК Первая"
                         break
     
-    # 4. Находим начало таблицы (строку с заголовками)
+    # 4. Округляем все числовые значения до целых чисел
+    df_new = round_numeric_values(df_new)
+    print(f"   🔢 Все числовые значения округлены до целых чисел")
+    
+    # 5. Находим начало таблицы (строку с заголовками)
     header_row_idx = None
     for i in range(df_new.shape[0]):
         row_values = df_new.iloc[i].astype(str).values
@@ -77,7 +96,7 @@ def process_report(file_path, output_dir):
         print(f"   ⚠️ Не удалось найти заголовки таблицы в {file_path.name}")
         return None
     
-    # 5. Находим конец таблицы
+    # 6. Находим конец таблицы
     last_data_row = header_row_idx
     for i in range(header_row_idx + 1, df_new.shape[0]):
         row = df_new.iloc[i]
@@ -88,7 +107,7 @@ def process_report(file_path, output_dir):
             break
         last_data_row = i
     
-    # 6. Формируем итоговую структуру
+    # 7. Формируем итоговую структуру
     result_rows = []
     
     # Пустая первая строка
@@ -117,12 +136,20 @@ def process_report(file_path, output_dir):
     with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
         df_output.to_excel(writer, sheet_name='Лист_1', index=False, header=False)
     
-    # Принудительно исправляем через openpyxl
+    # Принудительно исправляем через openpyxl и округляем числа
     wb = openpyxl.load_workbook(output_path)
     ws = wb['Лист_1']
     
-    # Принудительно меняем ячейку B2 (строка 2, колонка 2) на "СоВ"
+    # Принудительно меняем ячейку B2 (строка 2, колонка 2)
     ws.cell(row=2, column=2).value = "Сводный отчет по портфелям УК Первая"
+    
+    # Дополнительное округление всех числовых значений в листе
+    for row in range(1, ws.max_row + 1):
+        for col in range(1, ws.max_column + 1):
+            cell = ws.cell(row=row, column=col)
+            if isinstance(cell.value, (int, float)) and not isinstance(cell.value, bool):
+                # Округляем до целого числа
+                cell.value = round(cell.value)
     
     # Удаляем пустые строки снизу
     for row in range(ws.max_row, 0, -1):
