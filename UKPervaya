@@ -52,8 +52,8 @@ def process_report(file_path, output_dir):
         old_value = df_new.iloc[1, 1]
         if pd.notna(old_value):
             print(f"   Старое значение в B2: '{old_value}'")
-        df_new.iloc[1, 1] = "СоВ"
-        print(f"   ✅ Изменено B2 на: 'СоВ'")
+        df_new.iloc[1, 1] = "Сводный отчет по портфелям УК Первая"
+        print(f"   ✅ Изменено B2 на: 'Сводный отчет по портфелям УК Первая'")
     
     # 3. Также меняем везде, где встречается любое из старых названий
     old_names = ["Сводный отчет по портфелям", "Сводный отчет по портфелю", "Сводный отчет"]
@@ -62,7 +62,7 @@ def process_report(file_path, output_dir):
             if pd.notna(df_new.iloc[i, j]) and isinstance(df_new.iloc[i, j], str):
                 for old_name in old_names:
                     if old_name in df_new.iloc[i, j]:
-                        df_new.iloc[i, j] = "СоВ"
+                        df_new.iloc[i, j] = "Сводный отчет по портфелям УК Первая"
                         break
     
     # 4. Находим начало таблицы (строку с заголовками)
@@ -122,7 +122,7 @@ def process_report(file_path, output_dir):
     ws = wb['Лист_1']
     
     # Принудительно меняем ячейку B2 (строка 2, колонка 2) на "СоВ"
-    ws.cell(row=2, column=2).value = "СоВ"
+    ws.cell(row=2, column=2).value = "Сводный отчет по портфелям УК Первая"
     
     # Удаляем пустые строки снизу
     for row in range(ws.max_row, 0, -1):
@@ -220,10 +220,10 @@ def backup_original_files(input_dir, backup_dir=None):
 
 if __name__ == "__main__":
     # Папка с исходными отчётами (откуда берём файлы)
-    INPUT_FOLDER = r'C:\Users\ytggf\OneDrive\Документы\renlife\Сводные ааааа\444'
+    INPUT_FOLDER = r'\\fs-01.renlife.com\alldocs\Инвестиционный департамент\7.0 Treasury\diadoc_connector\Документооборот завершён\7710183778-АО УК -ПЕРВАЯ-'
     
     # Папка для результатов (куда сохраняем обработанные файлы)
-    OUTPUT_FOLDER = r'C:\Users\ytggf\OneDrive\Документы\renlife\Сводные ааааа\обработанные_отчёты'
+    OUTPUT_FOLDER = r'M:\Финансовый департамент\Treasury\3. ЗАКРЫТИЕ\Отчеты УК\Сводные отчеты УК\2026\УК Первая'
     
     # СОЗДАНИЕ РЕЗЕРВНОЙ КОПИИ (рекомендуется, но можно закомментировать)
     # backup_original_files(INPUT_FOLDER)
