@@ -369,14 +369,17 @@ def process_first():
                 if pd.isna(h):
                     continue
                 h_str = str(h).strip()
-                if 'День' in h_str:
+                
+                # ТОЧНОЕ определение столбцов, исключая столбец "Разница"
+                if h_str == 'День':
                     col_map['date'] = i
-                elif 'СЧА Методика' in h_str:
+                elif h_str == 'СЧА Методика':
                     col_map['scha_method'] = i
-                elif 'СЧА Баланс' in h_str:
+                elif h_str == 'СЧА Баланс':
                     col_map['scha_balance'] = i
-                elif 'СЧА из П2' in h_str:
+                elif h_str == 'СЧА из П2':
                     col_map['scha_p2'] = i
+                # Пропускаем столбец "Разница СЧА Методика- СЧА Баланс" - не добавляем в col_map
             
             if 'date' not in col_map:
                 continue
@@ -548,8 +551,5 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-День	СЧА Методика	СЧА Баланс	СЧА из П2 Сумма вводов УУ, руб	Сумма выводов УУ, руб
-День	СЧА Методика	СЧА Баланс	СЧА из П2	Разница СЧА Методика- СЧА Баланс	Сумма вводов УУ, руб	Сумма выводов УУ, руб
 
 
