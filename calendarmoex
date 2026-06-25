@@ -1,0 +1,94 @@
+mport requests
+import zipfile
+import io
+import pandas as pd
+from datetime import datetime, timedelta
+
+login = 'y'
+password = 'x'
+
+def generate_url(date_str):
+    y, m, d = date_str.split('-')
+    return f'https://iss.moex.com/iss/downloads/engines/stock/markets/bonds/years/{y}/months/{m}/days/{d}/securities_moex_stock_bonds_{y}_{m}_{d}.csv.zip'
+
+def get_last_trading_days(n):
+    trading_days = set()
+    end_date = datetime.today() - timedelta(days=1)
+    batch_size = 60
+    max_attempts = 10
+    attempts = 0
+
+    while len(trading_days) < n and attempts < max_attempts:
+        start_date = end_date - timedelta(days=batch_size)
+        url = (
+            f"https://iss.moex.com/iss/history/engines/stock/markets/index/securities/IMOEX.json"
+            f"?from={start_date.strftime('%Y-%m-%d')}&till={end_date.strftime('%Y-%m-%d')}"
+        )
+        response = requests.get(url)
+        if response.status_code != 200:
+            raise Exception(f"Ошибка при запросе данных: {response.status_code}")
+
+        data = response.json()
+        rows = data.get("history", {}).get("data", [])
+        columns = data.get("history", {}).get("columns", [])
+
+        if not rows or 'TRADEDATE' not in columns:
+            raise ValueError("Не удалось найти поле TRADEDATE в ответе MOEX.")
+
+        date_index = columns.index("TRADEDATE")
+        new_dates = {row[date_index] for row in rows if row[date_index] is not None}
+        trading_days.update(new_dates)
+
+        end_date = start_date - timedelta(days=1)
+        attempts += 1
+
+    if len(trading_days) < n:
+        raise Exception(f"Не удалось собрать {n} торговых дней за {attempts} попыток.")
+
+    return sorted(trading_days, reverse=True)[:n]
+
+session = requests.Session()
+auth_response = session.get('https://passport.moex.com/authenticate', auth=(login, password))
+
+if auth_response.status_code == 200:
+    print("Авторизация успешна")
+
+    dates = get_last_trading_days(30)
+    print(f"Найдено {len(dates)} торговых дней: {dates[0]} → {dates[-1]}")
+
+    combined_df = pd.DataFrame()
+
+    for date in dates:
+        url = generate_url(date)
+        print(f"Загружаю данные за {date}...")
+
+        response = session.get(url)
+        if response.status_code == 200:
+            print(f"Файл за {date} успешно загружен")
+
+            with zipfile.ZipFile(io.BytesIO(response.content)) as zip_file:
+                file_name_in_zip = zip_file.namelist()[0]
+
+                with zip_file.open(file_name_in_zip) as csv_file:
+                    df = pd.read_csv(csv_file, sep=';', decimal=',', encoding='cp1251', skiprows=2)
+
+                    for col in df.columns:
+                        if df[col].dtype == 'object':
+                            try:
+                                df[col] = df[col].str.replace(',', '.').astype(float)
+                            except (ValueError, AttributeError):
+                                pass
+
+                    df = df.applymap(lambda x: x.replace('SUR', 'RUB') if isinstance(x, str) else x)
+
+                    combined_df = pd.concat([combined_df, df], ignore_index=True)
+        else:
+            print(f"Ошибка при скачивании за {date}: статус {response.status_code}")
+
+    output_file = 'combined_moex_data.csv'
+    combined_df.to_csv(output_file, index=False, sep=';', decimal='.', encoding='cp1251')
+    print(f"\nИтоговый CSV сохранён как: {output_file}")
+
+else:
+    print(f"Ошибка авторизации: {auth_response.status_code}")
+
