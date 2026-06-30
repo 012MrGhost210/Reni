@@ -3,23 +3,7 @@ import re
 import shutil
 import zipfile
 from datetime import datetime
-from pathlib import Path
 from typing import Optional, Dict
-
-
-def fix_encoding(filename: str) -> str:
-    """
-    Исправляет кодировку имени файла из Windows-1251 в UTF-8
-    """
-    try:
-        # Пробуем перекодировать из Windows-1251 в UTF-8
-        return filename.encode('cp437').decode('cp1251')
-    except:
-        try:
-            # Если не получилось, пробуем другие варианты
-            return filename.encode('latin-1').decode('cp1251')
-        except:
-            return filename
 
 
 def find_today_folder(base_path: str) -> Optional[str]:
@@ -58,18 +42,16 @@ def find_zip_files(folder: str) -> Dict[str, str]:
     Возвращает словарь {маркер: полный_путь_к_архиву}
     """
     zip_files = {}
-    pattern_pr = re.compile(r"ПР", re.IGNORECASE)
-    pattern_pn = re.compile(r"ПН", re.IGNORECASE)
     
     try:
         for file in os.listdir(folder):
             if file.lower().endswith('.zip'):
                 file_path = os.path.join(folder, file)
                 
-                # Проверяем наличие маркеров
-                if pattern_pr.search(file):
+                # Проверяем наличие маркеров в имени файла
+                if 'ПР' in file:
                     zip_files['ПР'] = file_path
-                elif pattern_pn.search(file):
+                elif 'ПН' in file:
                     zip_files['ПН'] = file_path
     except PermissionError:
         print(f"Нет доступа к папке {folder}")
@@ -78,66 +60,80 @@ def find_zip_files(folder: str) -> Dict[str, str]:
     return zip_files
 
 
-def find_file_in_zip(zip_ref: zipfile.ZipFile, patterns: list) -> Optional[str]:
+def get_available_files(zip_path: str) -> list:
     """
-    Ищет файл в архиве по списку паттернов с учетом кодировки
+    Получает список всех файлов в архиве с их байтовыми представлениями
     """
-    for file in zip_ref.namelist():
-        # Пробуем разные варианты имени файла
-        original_name = file
-        decoded_name = fix_encoding(file)
-        
-        # Проверяем оба варианта имени
-        for pattern in patterns:
-            if pattern in original_name or pattern in decoded_name:
-                # Проверяем, что это Excel файл
-                if file.lower().endswith(('.xls', '.xlsx')):
-                    return file
+    files = []
+    try:
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            for name in zip_ref.namelist():
+                if name.lower().endswith(('.xls', '.xlsx')):
+                    files.append(name)
+    except Exception as e:
+        print(f"Ошибка при чтении архива: {e}")
+    return files
+
+
+def find_file_by_patterns(zip_path: str, patterns: list) -> Optional[str]:
+    """
+    Ищет файл в архиве по списку паттернов
+    Использует прямое сравнение байтов
+    """
+    try:
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            for name in zip_ref.namelist():
+                if not name.lower().endswith(('.xls', '.xlsx')):
+                    continue
+                
+                # Проверяем каждый паттерн
+                for pattern in patterns:
+                    # Пробуем разные варианты сравнения
+                    if pattern in name:
+                        print(f"Найден файл по паттерну '{pattern}': {name}")
+                        return name
+                    
+                    # Пробуем сравнить без учета регистра
+                    if pattern.lower() in name.lower():
+                        print(f"Найден файл по паттерну '{pattern}' (без учета регистра): {name}")
+                        return name
+                    
+                    # Пробуем искать в байтовом представлении
+                    try:
+                        # Конвертируем имя в байты и обратно для поиска
+                        name_bytes = name.encode('latin-1')
+                        pattern_bytes = pattern.encode('latin-1')
+                        if pattern_bytes in name_bytes:
+                            print(f"Найден файл по паттерну '{pattern}' (байтовое сравнение): {name}")
+                            return name
+                    except:
+                        pass
+    except Exception as e:
+        print(f"Ошибка при поиске в архиве: {e}")
     
     return None
 
 
-def extract_file_from_zip(zip_path: str, filename_patterns: list, destination: str) -> bool:
+def extract_and_rename(zip_path: str, source_filename: str, destination: str) -> bool:
     """
-    Извлекает файл из архива по шаблону имени и копирует в destination
+    Извлекает файл из архива и переименовывает его
     """
     try:
-        # Проверяем, существует ли архив
-        if not os.path.exists(zip_path):
-            print(f"Архив не найден: {zip_path}")
-            return False
-            
+        # Создаем директорию назначения
+        dest_dir = os.path.dirname(destination)
+        os.makedirs(dest_dir, exist_ok=True)
+        
         with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-            # Ищем файл по шаблонам
-            file_to_extract = find_file_in_zip(zip_ref, filename_patterns)
-            
-            if not file_to_extract:
-                print(f"Файл с шаблонами {filename_patterns} не найден в архиве {zip_path}")
-                print(f"Доступные файлы в архиве:")
-                for f in zip_ref.namelist():
-                    if f.lower().endswith(('.xls', '.xlsx')):
-                        decoded = fix_encoding(f)
-                        print(f"  - {decoded}")
-                return False
-            
-            # Создаем директорию назначения
-            dest_dir = os.path.dirname(destination)
-            os.makedirs(dest_dir, exist_ok=True)
-            
             # Извлекаем файл
-            extracted_path = zip_ref.extract(file_to_extract, dest_dir)
+            extracted_path = zip_ref.extract(source_filename, dest_dir)
             
-            # Переименовываем файл
-            final_dest = destination
-            shutil.move(extracted_path, final_dest)
-            print(f"Файл успешно извлечен и сохранен: {final_dest}")
+            # Переименовываем
+            shutil.move(extracted_path, destination)
+            print(f"Файл успешно извлечен и сохранен: {destination}")
             return True
-                    
-    except zipfile.BadZipFile:
-        print(f"Ошибка: файл {zip_path} не является zip-архивом или поврежден")
-        return False
+            
     except Exception as e:
-        print(f"Ошибка при работе с архивом {zip_path}: {e}")
+        print(f"Ошибка при извлечении файла: {e}")
         return False
 
 
@@ -187,12 +183,6 @@ def main():
     zip_files = find_zip_files(docs_folder)
     if not zip_files:
         print("Архивы с маркерами ПР или ПН не найдены")
-        try:
-            print(f"Файлы в папке {docs_folder}:")
-            for file in os.listdir(docs_folder):
-                print(f"  - {file}")
-        except:
-            pass
         return
     
     print(f"Найдены архивы: {zip_files}")
@@ -206,22 +196,48 @@ def main():
         date_str = get_date_from_filename(pr_filename)
         print(f"Извлеченная дата для ПР: {date_str}")
         
-        # Формируем имя целевого файла
-        target_filename_y = f"{date_str}_СЧА УК СПУТНИК - УПРАВЛЕНИЕ КАПИТАЛОМ (Д.У. 301024_1).xls"
-        dest_path_y = os.path.join(path_y, target_filename_y)
+        # Получаем список файлов в архиве
+        print("Сканируем архив ПР...")
+        files_in_zip = get_available_files(pr_zip)
+        print(f"Найдено {len(files_in_zip)} файлов в архиве")
         
-        # Извлекаем файл с разными вариантами поиска
-        print(f"Извлечение из {pr_zip} в {dest_path_y}")
-        patterns = ["СЧА", "УПРАВЛЕНИЕ КАПИТАЛОМ", "301024"]
-        extract_file_from_zip(pr_zip, patterns, dest_path_y)
+        # Ищем файл с 301024
+        target_file_301 = None
+        for f in files_in_zip:
+            if '301024' in f:
+                target_file_301 = f
+                print(f"Найден файл для 301024: {f}")
+                break
         
-        # Для второго пути (z) с другой датой
-        target_filename_z = f"{date_str}_СЧА УК СПУТНИК - УПРАВЛЕНИЕ КАПИТАЛОМ (Д.У. 080825_1).xls"
-        dest_path_z = os.path.join(path_z, target_filename_z)
+        if target_file_301:
+            # Формируем имя целевого файла для path_y
+            target_filename_y = f"{date_str}_СЧА УК СПУТНИК - УПРАВЛЕНИЕ КАПИТАЛОМ (Д.У. 301024_1).xls"
+            dest_path_y = os.path.join(path_y, target_filename_y)
+            
+            # Извлекаем файл
+            print(f"Извлечение файла для 301024 в {dest_path_y}")
+            extract_and_rename(pr_zip, target_file_301, dest_path_y)
+        else:
+            print("Файл с 301024 не найден в архиве ПР")
         
-        print(f"Извлечение из {pr_zip} в {dest_path_z}")
-        patterns_z = ["СЧА", "УПРАВЛЕНИЕ КАПИТАЛОМ", "080825"]
-        extract_file_from_zip(pr_zip, patterns_z, dest_path_z)
+        # Ищем файл с 080825
+        target_file_080 = None
+        for f in files_in_zip:
+            if '080825' in f:
+                target_file_080 = f
+                print(f"Найден файл для 080825: {f}")
+                break
+        
+        if target_file_080:
+            # Формируем имя целевого файла для path_z
+            target_filename_z = f"{date_str}_СЧА УК СПУТНИК - УПРАВЛЕНИЕ КАПИТАЛОМ (Д.У. 080825_1).xls"
+            dest_path_z = os.path.join(path_z, target_filename_z)
+            
+            # Извлекаем файл
+            print(f"Извлечение файла для 080825 в {dest_path_z}")
+            extract_and_rename(pr_zip, target_file_080, dest_path_z)
+        else:
+            print("Файл с 080825 не найден в архиве ПР")
     else:
         print("Архив ПР не найден")
     
@@ -234,14 +250,37 @@ def main():
         date_str = get_date_from_filename(pn_filename)
         print(f"Извлеченная дата для ПН: {date_str}")
         
-        # Формируем имя целевого файла
-        target_filename = f"{date_str}_Расчет стоимости активов ПН с учетом портфеля НПФ.xls"
-        dest_path_pn = os.path.join(path_i, target_filename)
+        # Получаем список файлов в архиве
+        print("Сканируем архив ПН...")
+        files_in_zip = get_available_files(pn_zip)
+        print(f"Найдено {len(files_in_zip)} файлов в архиве")
         
-        print(f"Извлечение из {pn_zip} в {dest_path_pn}")
-        # Для ПН ищем файл с "Расчет" или "стоимости активов"
-        patterns_pn = ["Расчет", "стоимости активов", "НПФ"]
-        extract_file_from_zip(pn_zip, patterns_pn, dest_path_pn)
+        # Ищем файл для ПН
+        target_file_pn = None
+        # Пробуем найти по разным паттернам
+        patterns = ['Расчет', 'стоимости', 'активов', 'НПФ']
+        for f in files_in_zip:
+            for pattern in patterns:
+                if pattern in f:
+                    target_file_pn = f
+                    print(f"Найден файл для ПН по паттерну '{pattern}': {f}")
+                    break
+            if target_file_pn:
+                break
+        
+        if target_file_pn:
+            # Формируем имя целевого файла
+            target_filename_pn = f"{date_str}_Расчет стоимости активов ПН с учетом портфеля НПФ.xls"
+            dest_path_pn = os.path.join(path_i, target_filename_pn)
+            
+            # Извлекаем файл
+            print(f"Извлечение файла для ПН в {dest_path_pn}")
+            extract_and_rename(pn_zip, target_file_pn, dest_path_pn)
+        else:
+            print("Файл для ПН не найден в архиве")
+            print("Доступные файлы:")
+            for f in files_in_zip[:5]:  # Показываем первые 5 файлов
+                print(f"  - {f}")
     else:
         print("Архив ПН не найден")
     
