@@ -119,9 +119,10 @@ def get_second_part_from_pr_archive(zip_path: str) -> str:
 
 def main():
     # Пути (замените на свои)
-    path_x = r"C:\Ваш_путь_X"  # Путь для поиска папки с датой
-    path_y = r"C:\Ваш_путь_Y"  # Базовый путь для файла ПР
-    path_z = r"C:\Ваш_путь_Z"  # Базовый путь для второго файла ПР (с другой датой)
+    path_x = r"Q:\Финансовый отдел\01.Перечень имущества Фонда (СД)"  # Путь для поиска папки с датой
+    path_y = r"\\fs-01.renlife.com\alldocs\Финансовый департамент\Treasury\18. НПФ\1. Отчеты\1.1 Ежедневные отчеты\СПУТНИК\Акутальные"  # Базовый путь для файла ПР
+    path_z = r"\\fs-01.renlife.com\alldocs\Финансовый департамент\Treasury\18. НПФ\1. Отчеты\1.1 Ежедневные отчеты\ФОНД\Актуальные данные"  # Базовый путь для второго файла ПР (с другой датой)
+    path_i = r"\\fs-01.renlife.com\alldocs\Финансовый департамент\Treasury\18. НПФ\1. Отчеты\1.1 Ежедневные отчеты\ВИМ"
     
     # Шаг 1: Находим папку с сегодняшней датой
     today_folder = find_today_folder(path_x)
@@ -182,7 +183,7 @@ def main():
         date_str = get_date_from_filename(pn_filename)
         
         # Формируем имя целевого файла
-        target_filename = f"{date_str}_Расчётстоимости активов.xls"
+        target_filename = f"{date_str}_Расчет стоимости активов ПН с учетом портфеля НПФ.xls"
         
         # Путь для сохранения (можно задать другой путь)
         dest_path_pn = os.path.join(path_y, target_filename)  # или другой путь
@@ -195,3 +196,8 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+Traceback (most recent call last):
+  File "c:/Users/Ilya.Matveev2/Скрипты/SCHA_NPF.py", line 9, in <module>
+    def find_today_folder(base_path: str) -> str | None:
+TypeError: unsupported operand type(s) for |: 'type' and 'NoneType'
