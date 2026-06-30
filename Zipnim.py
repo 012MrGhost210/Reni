@@ -204,3 +204,35 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+import os
+
+# Путь к папке с архивами (замени на свой)
+folder_path = r"Q:\Финансовый отдел\01.Перечень имущества Фонда (СД)\2026_06_30\Документы от Гаранта СД НТД"
+
+# Получаем список файлов
+files = os.listdir(folder_path)
+
+print(f"Папка: {folder_path}")
+print("="*80)
+print(f"Всего файлов: {len(files)}\n")
+
+# Показываем все файлы
+print("Все файлы:")
+for i, file in enumerate(files, 1):
+    print(f"{i:3}. {file}")
+
+# Показываем только zip файлы
+print("\n" + "="*80)
+print("ZIP архивы:")
+zip_files = [f for f in files if f.lower().endswith('.zip')]
+for i, file in enumerate(zip_files, 1):
+    print(f"{i:3}. {file}")
+    
+    # Пробуем расшифровать имя файла (если оно в неправильной кодировке)
+    try:
+        decoded = file.encode('latin-1').decode('cp1251')
+        if decoded != file:
+            print(f"     Расшифровка: {decoded}")
+    except:
+        pass
