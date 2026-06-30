@@ -196,3 +196,8 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+Traceback (most recent call last):
+  File "c:/Users/Ilya.Matveev2/Скрипты/SCHA_NPF.py", line 9, in <module>
+    def find_today_folder(base_path: str) -> str | None:
+TypeError: unsupported operand type(s) for |: 'type' and 'NoneType'
