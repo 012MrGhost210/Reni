@@ -7,6 +7,21 @@ from pathlib import Path
 from typing import Optional, Dict
 
 
+def fix_encoding(filename: str) -> str:
+    """
+    Исправляет кодировку имени файла из Windows-1251 в UTF-8
+    """
+    try:
+        # Пробуем перекодировать из Windows-1251 в UTF-8
+        return filename.encode('cp437').decode('cp1251')
+    except:
+        try:
+            # Если не получилось, пробуем другие варианты
+            return filename.encode('latin-1').decode('cp1251')
+        except:
+            return filename
+
+
 def find_today_folder(base_path: str) -> Optional[str]:
     """
     Ищет папку с сегодняшней датой в формате ГГГГ_ММ_ДД
@@ -63,7 +78,26 @@ def find_zip_files(folder: str) -> Dict[str, str]:
     return zip_files
 
 
-def extract_file_from_zip(zip_path: str, filename_pattern: str, destination: str) -> bool:
+def find_file_in_zip(zip_ref: zipfile.ZipFile, patterns: list) -> Optional[str]:
+    """
+    Ищет файл в архиве по списку паттернов с учетом кодировки
+    """
+    for file in zip_ref.namelist():
+        # Пробуем разные варианты имени файла
+        original_name = file
+        decoded_name = fix_encoding(file)
+        
+        # Проверяем оба варианта имени
+        for pattern in patterns:
+            if pattern in original_name or pattern in decoded_name:
+                # Проверяем, что это Excel файл
+                if file.lower().endswith(('.xls', '.xlsx')):
+                    return file
+    
+    return None
+
+
+def extract_file_from_zip(zip_path: str, filename_patterns: list, destination: str) -> bool:
     """
     Извлекает файл из архива по шаблону имени и копирует в destination
     """
@@ -74,21 +108,17 @@ def extract_file_from_zip(zip_path: str, filename_pattern: str, destination: str
             return False
             
         with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-            # Ищем файл по шаблону
-            found_files = []
-            for file in zip_ref.namelist():
-                # Проверяем только файлы .xls и .xlsx
-                if file.lower().endswith(('.xls', '.xlsx')):
-                    if filename_pattern in file:
-                        found_files.append(file)
+            # Ищем файл по шаблонам
+            file_to_extract = find_file_in_zip(zip_ref, filename_patterns)
             
-            if not found_files:
-                print(f"Файл с шаблоном '{filename_pattern}' не найден в архиве {zip_path}")
-                print(f"Доступные файлы: {[f for f in zip_ref.namelist() if f.lower().endswith(('.xls', '.xlsx'))]}")
+            if not file_to_extract:
+                print(f"Файл с шаблонами {filename_patterns} не найден в архиве {zip_path}")
+                print(f"Доступные файлы в архиве:")
+                for f in zip_ref.namelist():
+                    if f.lower().endswith(('.xls', '.xlsx')):
+                        decoded = fix_encoding(f)
+                        print(f"  - {decoded}")
                 return False
-            
-            # Берем первый найденный файл
-            file_to_extract = found_files[0]
             
             # Создаем директорию назначения
             dest_dir = os.path.dirname(destination)
@@ -128,7 +158,7 @@ def get_date_from_filename(filename: str) -> str:
 
 
 def main():
-    # Пути (замените на свои)
+    # Пути
     path_x = r"Q:\Финансовый отдел\01.Перечень имущества Фонда (СД)"
     path_y = r"\\fs-01.renlife.com\alldocs\Финансовый департамент\Treasury\18. НПФ\1. Отчеты\1.1 Ежедневные отчеты\СПУТНИК\Акутальные"
     path_z = r"\\fs-01.renlife.com\alldocs\Финансовый департамент\Treasury\18. НПФ\1. Отчеты\1.1 Ежедневные отчеты\ФОНД\Актуальные данные"
@@ -157,7 +187,6 @@ def main():
     zip_files = find_zip_files(docs_folder)
     if not zip_files:
         print("Архивы с маркерами ПР или ПН не найдены")
-        # Выводим список файлов в папке для диагностики
         try:
             print(f"Файлы в папке {docs_folder}:")
             for file in os.listdir(docs_folder):
@@ -175,22 +204,24 @@ def main():
         
         # Извлекаем дату из имени файла
         date_str = get_date_from_filename(pr_filename)
-        print(f"Извлеченная дата: {date_str}")
+        print(f"Извлеченная дата для ПР: {date_str}")
         
         # Формируем имя целевого файла
-        target_filename = f"{date_str}_СЧА УК СПУТНИК - УПРАВЛЕНИЕ КАПИТАЛОМ (Д.У. 301024_1).xls"
-        dest_path_y = os.path.join(path_y, target_filename)
+        target_filename_y = f"{date_str}_СЧА УК СПУТНИК - УПРАВЛЕНИЕ КАПИТАЛОМ (Д.У. 301024_1).xls"
+        dest_path_y = os.path.join(path_y, target_filename_y)
         
-        # Извлекаем файл
+        # Извлекаем файл с разными вариантами поиска
         print(f"Извлечение из {pr_zip} в {dest_path_y}")
-        extract_file_from_zip(pr_zip, "СЧА", dest_path_y)
+        patterns = ["СЧА", "УПРАВЛЕНИЕ КАПИТАЛОМ", "301024"]
+        extract_file_from_zip(pr_zip, patterns, dest_path_y)
         
         # Для второго пути (z) с другой датой
         target_filename_z = f"{date_str}_СЧА УК СПУТНИК - УПРАВЛЕНИЕ КАПИТАЛОМ (Д.У. 080825_1).xls"
         dest_path_z = os.path.join(path_z, target_filename_z)
         
         print(f"Извлечение из {pr_zip} в {dest_path_z}")
-        extract_file_from_zip(pr_zip, "СЧА", dest_path_z)
+        patterns_z = ["СЧА", "УПРАВЛЕНИЕ КАПИТАЛОМ", "080825"]
+        extract_file_from_zip(pr_zip, patterns_z, dest_path_z)
     else:
         print("Архив ПР не найден")
     
@@ -205,12 +236,12 @@ def main():
         
         # Формируем имя целевого файла
         target_filename = f"{date_str}_Расчет стоимости активов ПН с учетом портфеля НПФ.xls"
-        
-        # Путь для сохранения
         dest_path_pn = os.path.join(path_i, target_filename)
         
         print(f"Извлечение из {pn_zip} в {dest_path_pn}")
-        extract_file_from_zip(pn_zip, "Расчет", dest_path_pn)
+        # Для ПН ищем файл с "Расчет" или "стоимости активов"
+        patterns_pn = ["Расчет", "стоимости активов", "НПФ"]
+        extract_file_from_zip(pn_zip, patterns_pn, dest_path_pn)
     else:
         print("Архив ПН не найден")
     
@@ -219,10 +250,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-Файл с шаблоном 'СЧА' не найден в архиве Q:\Финансовый отдел\01.Перечень имущества Фонда (СД)\2026_06_30\Документы от Гаранта СД НТД\Отчеты_2026-06-26_ПР_2606305650081.zip
-Доступные файлы: ['26.06.2026_ÅÑαÑτÑ¡∞ ¿¼πΘÑßΓóá îÇèÉÄ.xlsx', '26.06.2026_ÅÑαÑτÑ¡∞ ¿¼πΘÑßΓóá ôè æÅôÆìêè - ôÅÉÇéïàìêà èÇÅêÆÇïÄî (ä.ô. 080825_1).xlsx', '26.06.2026_ÅÑαÑτÑ¡∞ ¿¼πΘÑßΓóá ôè æÅôÆìêè - ôÅÉÇéïàìêà èÇÅêÆÇïÄî (ä.ô. 301024_1).xlsx', '26.06.2026_ÅÑαÑτÑ¡∞ ¿¼πΘÑßΓóá ö«¡ñ_299-öç.xlsx', '26.06.2026_ÅÑαÑτÑ¡∞ ¿¼πΘÑßΓóá ö«¡ñ_Åäæ.xlsx', '26.06.2026_ÅÑαÑτÑ¡∞ ßñÑ½«¬ îÇèÉÄ.xls', '26.06.2026_ÅÑαÑτÑ¡∞ ßñÑ½«¬ ôè æÅôÆìêè - ôÅÉÇéïàìêà èÇÅêÆÇïÄî (ä.ô. 080825_1).xls', '26.06.2026_ÅÑαÑτÑ¡∞ ßñÑ½«¬ ôè æÅôÆìêè - ôÅÉÇéïàìêà èÇÅêÆÇïÄî (ä.ô. 301024_1).xls', '26.06.2026_ÅÑαÑτÑ¡∞ ßñÑ½«¬ ö«¡ñ_299-öç.xls', '26.06.2026_ÅÑαÑτÑ¡∞ ßñÑ½«¬ ö«¡ñ_Åäæ.xls', '26.06.2026_æÉæ.xls', '26.06.2026_æùÇ ôè æÅôÆìêè - ôÅÉÇéïàìêà èÇÅêÆÇïÄî (ä.ô. 080825_1) .xls', '26.06.2026_æùÇ ôè æÅôÆìêè - ôÅÉÇéïàìêà èÇÅêÆÇïÄî (ä.ô. 301024_1) .xls', '26.06.2026_æùÇ ö«¡ñ_299-öç.xls', '26.06.2026_æùÇ ö«¡ñ_Åäæ.xls', '26.06.2026_Ç¬Γ »ÑαÑαáßτÑΓá ßΓ«¿¼«ßΓ¿ á¬Γ¿ó«ó ÅÉ.xls', '26.06.2026_ÉæÇ.xls']
-Извлеченная дата для ПН: 26.06.2026
-Извлечение из Q:\Финансовый отдел\01.Перечень имущества Фонда (СД)\2026_06_30\Документы от Гаранта СД НТД\Отчеты_2026-06-26_ПН_2606305649894.zip в \\fs-01.renlife.com\alldocs\Финансовый департамент\Treasury\18. НПФ\1. Отчеты\1.1 Ежедневные отчеты\ВИМ\26.06.2026_Расчет стоимости активов ПН с учетом портфеля НПФ.xls
-Файл с шаблоном 'Расчет' не найден в архиве Q:\Финансовый отдел\01.Перечень имущества Фонда (СД)\2026_06_30\Документы от Гаранта СД НТД\Отчеты_2026-06-26_ПН_2606305649894.zip
-Доступные файлы: ['26.06.2026_ÅÑαÑτÑ¡∞ ¿¼πΘÑßΓóá ¿¡óÑßΓ »«αΓΣÑ½∩ ö«¡ñá.xlsx', '26.06.2026_ÅÑαÑτÑ¡∞ ¿¼πΘÑßΓóá Åì ß πτÑΓ«¼ »«αΓΣÑ½∩ ìÅö.xlsx', '26.06.2026_ÅÑαÑτÑ¡∞ ¿¼πΘÑßΓóá ôè éêî.xlsx', '26.06.2026_ÉáßτÑΓ ßΓ«¿¼«ßΓ¿ á¬Γ¿ó«ó ¿¡óÑßΓ »«αΓΣÑ½∩ ö«¡ñá.xls', '26.06.2026_ÉáßτÑΓ ßΓ«¿¼«ßΓ¿ á¬Γ¿ó«ó Åì ß πτÑΓ«¼ »«αΓΣÑ½∩ ìÅö.xls', '26.06.2026_ÉáßτÑΓ ßΓ«¿¼«ßΓ¿ á¬Γ¿ó«ó ôè éêî.xls', '26.06.2026_ÉáßτÑΓ ßΓ«¿¼«ßΓ¿ τ¿ßΓδσ á¬Γ¿ó«ó ¿¡óÑßΓ »«αΓΣÑ½∩ ö«¡ñá.xls', '26.06.2026_ÉáßτÑΓ ßΓ«¿¼«ßΓ¿ τ¿ßΓδσ á¬Γ¿ó«ó Åì ß πτÑΓ«¼ »«αΓΣÑ½∩ ìÅö.xls', '26.06.2026_ÉáßτÑΓ ßΓ«¿¼«ßΓ¿ τ¿ßΓδσ á¬Γ¿ó«ó ôè éêî.xls']
-Обработка завершена!
