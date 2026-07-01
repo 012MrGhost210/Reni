@@ -14,19 +14,16 @@ REMOVE_FROM_NAME = [
     "{Документооборот завершен}",
 ]
 
-# ==================== КОНФИГУРАЦИЯ ИСТОЧНИКОВ ====================
+# Символы для нормализации (удаляем при сравнении)
+NORMALIZE_CHARS = ['+', ' ', '_', '-']  # можно добавить любые символы
 
-# Каждый источник - это словарь с:
-# - source_dir: путь к папке-источнику (управляющий извлекается из последней папки)
-# - manager: можно указать вручную или оставить None для автоподстановки
-# - configs: конфиги для этого источника
+# ==================== КОНФИГУРАЦИЯ ИСТОЧНИКОВ ====================
 
 SOURCES_CONFIG = [
     {
         "source_dir": r"\\fs-01.renlife.com\alldocs\Инвестиционный департамент\7.0 Treasury\Diadoc\diadoc_connector\Документооборот завершен\7710183778-АО УК -ПЕРВАЯ-",
-        "manager": None,  # None = взять из названия последней папки
+        "manager": None,
         "configs": {
-            # Правило 1: Выгрузка операций
             "{Документооборот завершен}Выгрузка операций_": {
                 "date_format": "%d%m%Y",
                 "date_regex": r"(\d{8})",
@@ -34,7 +31,6 @@ SOURCES_CONFIG = [
                 "date_at_start": False,
                 "skip_prefix": False,
             },
-            # Правило 2: Журнал учета операций
             "{Документооборот завершен}I02_514833_k_d_": {
                 "date_format": "%d%m%Y",
                 "date_regex": r"(\d{6})",
@@ -42,7 +38,6 @@ SOURCES_CONFIG = [
                 "date_at_start": False,
                 "skip_prefix": False,
             },
-            # Правило 3: Отчеты брокера
             "{Документооборот завершен}": {
                 "date_format": "%Y.%m.%d",
                 "date_regex": r"(\d{4}\.\d{2}\.\d{2})",
@@ -52,49 +47,33 @@ SOURCES_CONFIG = [
             }
         }
     },
-    # ===== ДОБАВЛЯЙ НОВЫХ УПРАВЛЯЮЩИХ СЮДА =====
-    {
-        "source_dir": r"\\fs-01.renlife.com\alldocs\Инвестиционный департамент\7.0 Treasury\Diadoc\diadoc_connector\Документооборот завершен\7710183778-АО УК -ВТОРАЯ-",
-        "manager": "УК Вторая",  # можно указать вручную
-        "configs": {
-            # Те же правила, что и для первого управляющего
-            "{Документооборот завершен}Выгрузка операций_": {
-                "date_format": "%d%m%Y",
-                "date_regex": r"(\d{8})",
-                "destination_template": r"10.НАПФ - Ценные бумаги\*ГГГГ*\*Управляющий*\*Месяц*",
-                "date_at_start": False,
-                "skip_prefix": False,
-            },
-            "{Документооборот завершен}I02_514833_k_d_": {
-                "date_format": "%d%m%Y",
-                "date_regex": r"(\d{6})",
-                "destination_template": r"6.Журнал учета операций\*ГГГГ*\*Месяц*\*Управляющий*",
-                "date_at_start": False,
-                "skip_prefix": False,
-            },
-            "{Документооборот завершен}": {
-                "date_format": "%Y.%m.%d",
-                "date_regex": r"(\d{4}\.\d{2}\.\d{2})",
-                "destination_template": r"2 Отчеты брокера\*ГГГГ*\*Месяц*\*Управляющий*",
-                "date_at_start": True,
-                "skip_prefix": True,
-            }
-        }
-    }
+    # Добавляй других управляющих сюда
 ]
 
 # ==================== ОСНОВНАЯ ЛОГИКА ====================
 
-# Расширения файлов, которые обрабатываем
 ALLOWED_EXTENSIONS = {'.pdf', '.xlsx', '.xls', '.doc', '.docx', '.txt'}
 
+def normalize_filename(filename):
+    """
+    Нормализует имя файла для сравнения:
+    - удаляет символы из NORMALIZE_CHARS
+    - приводит к нижнему регистру
+    """
+    name_without_ext, ext = os.path.splitext(filename)
+    
+    # Удаляем символы из NORMALIZE_CHARS
+    for char in NORMALIZE_CHARS:
+        name_without_ext = name_without_ext.replace(char, '')
+    
+    # Приводим к нижнему регистру
+    name_without_ext = name_without_ext.lower()
+    
+    return name_without_ext + ext
+
 def extract_manager_from_path(source_dir):
-    """
-    Извлекает название управляющего из последней папки пути
-    """
-    # Нормализуем путь
+    """Извлекает название управляющего из последней папки пути"""
     normalized_path = source_dir.replace('\\', '/').rstrip('/')
-    # Берем последнюю часть
     manager = os.path.basename(normalized_path)
     return manager
 
@@ -106,18 +85,14 @@ def clean_filename(filename):
     return new_name
 
 def extract_date_from_filename(filename, configs):
-    """
-    Извлекает дату из имени файла на основе конфигурации корней
-    """
+    """Извлекает дату из имени файла на основе конфигурации корней"""
     for root, config in configs.items():
         if filename.startswith(root):
-            # Получаем часть после корня
             if config.get("skip_prefix", False):
                 name_part = filename
             else:
                 name_part = filename[len(root):]
             
-            # Ищем дату по регулярке
             match = re.search(config["date_regex"], name_part)
             if match:
                 date_str = match.group(1)
@@ -130,43 +105,62 @@ def extract_date_from_filename(filename, configs):
     return None, None, None
 
 def build_destination_path(date_obj, config, original_filename, manager_name):
-    """
-    Строит путь назначения на основе шаблона
-    """
+    """Строит путь назначения на основе шаблона"""
     year = str(date_obj.year)
     month = f"{date_obj.month:02d}"
     day = f"{date_obj.day:02d}"
     
-    # Получаем шаблон пути
     template = config["destination_template"]
     
-    # Заменяем переменные
     dest_path = template.replace("*ГГГГ*", year)
     dest_path = dest_path.replace("*Месяц*", month)
     dest_path = dest_path.replace("*День*", day)
     dest_path = dest_path.replace("*Управляющий*", manager_name)
     
-    # Полный путь
     full_path = os.path.join(BASE_DEST_DIR, dest_path)
-    
-    # Создаем папки
     Path(full_path).mkdir(parents=True, exist_ok=True)
     
-    # Очищаем имя файла
     clean_name = clean_filename(original_filename)
     if not clean_name or clean_name == os.path.splitext(original_filename)[1]:
         clean_name = original_filename
     
     return os.path.join(full_path, clean_name)
 
+def check_file_exists(dest_path):
+    """
+    Проверяет, существует ли файл с учетом нормализации имен.
+    Возвращает True если найден файл с таким же нормализованным именем.
+    """
+    dest_dir = os.path.dirname(dest_path)
+    target_filename = os.path.basename(dest_path)
+    
+    # Если папки нет, то и файла точно нет
+    if not os.path.exists(dest_dir):
+        return False
+    
+    # Нормализуем целевое имя для сравнения
+    target_normalized = normalize_filename(target_filename)
+    
+    # Получаем все файлы в папке назначения
+    try:
+        existing_files = [f for f in os.listdir(dest_dir) if os.path.isfile(os.path.join(dest_dir, f))]
+    except PermissionError:
+        # Если нет доступа к папке, считаем что файла нет (попробуем создать)
+        return False
+    
+    # Проверяем каждый файл
+    for existing_file in existing_files:
+        existing_normalized = normalize_filename(existing_file)
+        if existing_normalized == target_normalized:
+            return True
+    
+    return False
+
 def process_source(source_config):
-    """
-    Обрабатывает один источник
-    """
+    """Обрабатывает один источник"""
     source_dir = source_config["source_dir"]
     configs = source_config["configs"]
     
-    # Определяем имя управляющего
     if source_config.get("manager"):
         manager_name = source_config["manager"]
     else:
@@ -177,12 +171,10 @@ def process_source(source_config):
     print(f"📂 Источник: {source_dir}")
     print(f"{'='*70}")
     
-    # Проверяем существование папки-источника
     if not os.path.exists(source_dir):
         print(f"❌ Папка-источник не найдена: {source_dir}")
         return 0, 0, 0, 0
     
-    # Получаем список файлов
     files = [f for f in os.listdir(source_dir) if os.path.isfile(os.path.join(source_dir, f))]
     
     if not files:
@@ -197,14 +189,12 @@ def process_source(source_config):
     for filename in files:
         file_path = os.path.join(source_dir, filename)
         
-        # Проверяем расширение
         ext = os.path.splitext(filename)[1].lower()
         if ALLOWED_EXTENSIONS and ext not in ALLOWED_EXTENSIONS:
             print(f"⏭️ Пропускаем (неподдерживаемое расширение): {filename}")
             skipped += 1
             continue
         
-        # Извлекаем дату и конфиг
         date_obj, root, config = extract_date_from_filename(filename, configs)
         
         if date_obj is None:
@@ -212,17 +202,16 @@ def process_source(source_config):
             skipped_no_date += 1
             continue
         
-        # Формируем путь назначения
         dest_path = build_destination_path(date_obj, config, filename, manager_name)
         
-        # Проверяем, существует ли уже файл
-        if os.path.exists(dest_path):
-            print(f"⏭️ Файл уже существует, пропускаем: {os.path.basename(dest_path)}")
+        # Проверяем существование файла с учетом нормализации
+        if check_file_exists(dest_path):
+            print(f"⏭️ Файл уже существует (или его аналог): {filename}")
+            print(f"   -> {dest_path}")
             skipped_exists += 1
             continue
         
         try:
-            # Копируем файл
             shutil.copy2(file_path, dest_path)
             print(f"✅ {filename}")
             print(f"   -> {dest_path}")
