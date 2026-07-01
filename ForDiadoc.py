@@ -27,21 +27,21 @@ SOURCES_CONFIG = [
             "{Документооборот завершен}Выгрузка операций_": {
                 "date_format": "%d%m%Y",
                 "date_regex": r"(\d{8})",
-                "destination_template": r"10.НАПФ - Ценные бумаги\*ГГГГ*\*Управляющий*\*Месяц*",
+                "destination_template": r"test\10.НАПФ - Ценные бумаги\*ГГГГ*\*Управляющий*\*Месяц*",
                 "date_at_start": False,
                 "skip_prefix": False,
             },
             "{Документооборот завершен}I02_514833_k_d_": {
                 "date_format": "%d%m%Y",
                 "date_regex": r"(\d{6})",
-                "destination_template": r"6.Журнал учета операций\*ГГГГ*\*Месяц*\*Управляющий*",
+                "destination_template": r"test\6.Журнал учета операций\*ГГГГ*\*Месяц*\*Управляющий*",
                 "date_at_start": False,
                 "skip_prefix": False,
             },
-            "{Документооборот завершен}": {
+            "{Документооборот завершен}_27011_журнал учета ДС": {
                 "date_format": "%Y.%m.%d",
                 "date_regex": r"(\d{4}\.\d{2}\.\d{2})",
-                "destination_template": r"2 Отчеты брокера\*ГГГГ*\*Месяц*\*Управляющий*",
+                "destination_template": r"test\2 Отчеты брокера\*ГГГГ*\*Месяц*\*Управляющий*",
                 "date_at_start": True,
                 "skip_prefix": True,
             }
@@ -52,7 +52,7 @@ SOURCES_CONFIG = [
 
 # ==================== ОСНОВНАЯ ЛОГИКА ====================
 
-ALLOWED_EXTENSIONS = {'.pdf', '.xlsx', '.xls', '.doc', '.docx', '.txt'}
+ALLOWED_EXTENSIONS = {'.pdf', '.xlsx', '.xls', '.doc', '.docx', '.txt','.xml'}
 
 def normalize_filename(filename):
     """
