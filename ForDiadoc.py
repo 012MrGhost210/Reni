@@ -250,3 +250,5 @@ def process_all_sources():
 
 if __name__ == "__main__":
     process_all_sources()
+
+{Документооборот завершен}2026.06.29_27011_журнал учета ДС
