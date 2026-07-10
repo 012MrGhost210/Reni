@@ -39,9 +39,15 @@ MANAGER_MAPPING = {
 # Разрешенные расширения файлов
 ALLOWED_EXTENSIONS = {'.pdf', '.xlsx', '.xls', '.doc', '.docx', '.txt', '.xml'}
 
+# Что удаляем из названия при копировании (только фигурные скобки с содержимым)
+REMOVE_FROM_NAME = [
+    "{Документооборот завершен}",
+]
+
 # ==================== КОНФИГУРАЦИЯ ФАЙЛОВ ====================
 
-# Каждое правило - как определить дату и куда положить файл
+# ВАЖНО: правила проверяются ПО ПОРЯДКУ!
+# Сначала самые специфичные, потом общие
 FILE_RULES = [
     {
         # Правило 1: Выгрузка операций
@@ -49,24 +55,23 @@ FILE_RULES = [
         "date_regex": r"(\d{8})",  # 08072026 -> 8 цифр
         "date_format": "%d%m%Y",    # ДДММГГГГ
         "destination": r"10.НАПФ - Ценные бумаги\*ГГГГ*\*Управляющий*\*Месяц*",
-        "remove_prefix": True,      # Удаляем "{Документооборот завершен}"
+        "identifier": "Выгрузка операций",  # для отладки
     },
     {
-        # Правило 2: Журнал учета операций (I02)
+        # Правило 2: I02 (Журнал учета операций)
         "name_pattern": "{Документооборот завершен}I02_514833_k_d_",
         "date_regex": r"(\d{6})",   # 260706 -> 6 цифр
         "date_format": "%y%m%d",    # ГГММДД
         "destination": r"6.Журнал учета операций\*ГГГГ*\*Месяц*\*Управляющий*",
-        "remove_prefix": True,
+        "identifier": "I02_514833_k_d_",
     },
     {
         # Правило 3: Отчеты брокера (журнал учета ДС)
         "name_pattern": "{Документооборот завершен}",
-        "date_regex": r"(\d{4}\.\d{2}\.\d{2})",  # 2026.07.08
-        "date_format": "%Y.%m.%d",               # ГГГГ.ММ.ДД
+        "date_regex": r"(\d{4}\.\d{2}\.\d{2})_27011_журнал учета ДС",  # ищем дату + _27011_журнал учета ДС
+        "date_format": "%Y.%m.%d",   # ГГГГ.ММ.ДД
         "destination": r"2 Отчеты брокера\*ГГГГ*\*Месяц*\*Управляющий*",
-        "remove_prefix": True,
-        "subfolder": "журнал учета ДС",  # дополнительная папка
+        "identifier": "журнал учета ДС",
     },
 ]
 
@@ -74,11 +79,8 @@ FILE_RULES = [
 
 def get_manager_name(source_dir):
     """Извлекает имя управляющего из пути и преобразует по маппингу"""
-    # Берем последнюю папку из пути
     normalized_path = source_dir.replace('\\', '/').rstrip('/')
     raw_name = os.path.basename(normalized_path)
-    
-    # Применяем маппинг
     return MANAGER_MAPPING.get(raw_name, raw_name)
 
 def get_month_name(month_number):
@@ -98,17 +100,21 @@ def format_month_folder(date_obj):
     year = date_obj.year
     return f"{month_num}.{month_name} {year}"
 
+def clean_filename(filename):
+    """Удаляет из имени файла все части из REMOVE_FROM_NAME"""
+    new_name = filename
+    for remove_part in REMOVE_FROM_NAME:
+        new_name = new_name.replace(remove_part, "")
+    return new_name
+
 def extract_date_from_filename(filename, rule):
     """Извлекает дату из имени файла по правилу"""
     # Проверяем, начинается ли файл с нужного паттерна
     if not filename.startswith(rule["name_pattern"]):
         return None
     
-    # Убираем префикс, если нужно
-    if rule.get("remove_prefix", False):
-        name_part = filename[len(rule["name_pattern"]):]
-    else:
-        name_part = filename
+    # Убираем префикс
+    name_part = filename[len(rule["name_pattern"]):]
     
     # Ищем дату по регулярке
     match = re.search(rule["date_regex"], name_part)
@@ -127,7 +133,6 @@ def build_destination_path(date_obj, rule, manager_name, original_filename):
     """Строит путь назначения"""
     year = str(date_obj.year)
     month_folder = format_month_folder(date_obj)
-    month = f"{date_obj.month:02d}"
     
     # Получаем шаблон пути
     dest_path = rule["destination"]
@@ -137,27 +142,20 @@ def build_destination_path(date_obj, rule, manager_name, original_filename):
     dest_path = dest_path.replace("*Месяц*", month_folder)
     dest_path = dest_path.replace("*Управляющий*", manager_name)
     
-    # Добавляем подпапку, если есть
-    if "subfolder" in rule:
-        dest_path = os.path.join(dest_path, rule["subfolder"])
-    
     # Полный путь
     full_path = os.path.join(BASE_DEST_DIR, dest_path)
     
     # Создаем папки
     Path(full_path).mkdir(parents=True, exist_ok=True)
     
-    # Очищаем имя файла от префикса
-    clean_name = original_filename
-    if rule.get("remove_prefix", False):
-        clean_name = clean_name.replace(rule["name_pattern"], "")
+    # Очищаем имя файла (удаляем только {Документооборот завершен})
+    clean_name = clean_filename(original_filename)
     
     return os.path.join(full_path, clean_name)
 
 def normalize_filename(filename):
     """Нормализует имя файла для сравнения (удаляет +, пробелы и т.д.)"""
     name_without_ext, ext = os.path.splitext(filename)
-    # Удаляем лишние символы
     for char in ['+', ' ', '_', '-']:
         name_without_ext = name_without_ext.replace(char, '')
     return name_without_ext.lower() + ext
@@ -227,7 +225,7 @@ def process_files():
             skipped += 1
             continue
         
-        # Ищем подходящее правило
+        # Ищем подходящее правило (ПО ПОРЯДКУ!)
         found_rule = None
         date_obj = None
         
@@ -246,6 +244,9 @@ def process_files():
             print(f"⚠️ Не удалось извлечь дату из: {filename}")
             skipped_no_date += 1
             continue
+        
+        # Для отладки - показываем какое правило сработало
+        print(f"🔍 Правило: {found_rule.get('identifier', 'unknown')} -> {filename}")
         
         # Строим путь назначения
         dest_path = build_destination_path(date_obj, found_rule, manager_name, filename)
