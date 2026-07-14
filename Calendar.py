@@ -1,169 +1,285 @@
+import streamlit as st
 import pandas as pd
-from datetime import datetime
+import calendar
+from datetime import datetime, date
 import os
 
 # ============================================================
 # НАСТРАИВАЕМЫЕ ПАРАМЕТРЫ
 # ============================================================
-CALENDAR_FILE_PATH = r"M:\Финансовый департамент\Treasury\3. ЗАКРЫТИЕ\Отчеты УК\Сводные отчеты УК\Календарь.xlsx"
-PORTFOLIO_FILE_PATH = r"M:\Финансовый департамент\Treasury\3. ЗАКРЫТИЕ\Отчеты УК\Сводные отчеты УК\NAV.xlsx"
-OUTPUT_FILE_PATH = r"M:\Финансовый департамент\Treasury\3. ЗАКРЫТИЕ\Отчеты УК\Сводные отчеты УК\Coupon_events.xlsx"
+DATA_FILE_PATH = r"M:\Финансовый департамент\Treasury\3. ЗАКРЫТИЕ\Отчеты УК\Сводные отчеты УК\Coupon_events.xlsx"
 # ============================================================
 
-def load_calendar(file_path):
-    """Загружает календарь купонов"""
-    try:
-        if not os.path.exists(file_path):
-            print(f"File not found: {file_path}")
-            return pd.DataFrame()
-        
-        df = pd.read_excel(file_path, skiprows=3)
-        df.columns = ['ISIN', 'NAME', 'VOLUME', 'DATE', 'NOMINAL', 'CURRENCY', 
-                     'OUTSTANDING_NOMINAL', 'COUPON_RATE', 'PAYMENT', 'PAYMENT_RUB']
-        
-        # Преобразуем дату
-        df['DATE'] = pd.to_datetime(df['DATE'], errors='coerce')
-        df = df.dropna(subset=['DATE'])
-        
-        # Очищаем ISIN
-        df['ISIN'] = df['ISIN'].astype(str).str.strip()
-        df = df[df['ISIN'] != 'null']
-        df = df[df['ISIN'] != '']
-        
-        print(f"Calendar loaded: {len(df)} rows")
-        return df
-    except Exception as e:
-        print(f"Error loading calendar: {e}")
-        return pd.DataFrame()
+st.set_page_config(
+    page_title="📅 Coupon Calendar",
+    page_icon="📅",
+    layout="wide"
+)
 
-def load_portfolio(file_path):
-    """Загружает портфель NAV"""
+# --- Загрузка данных ---
+@st.cache_data
+def load_data(file_path):
+    """Загружает данные из файла Coupon_events.xlsx"""
     try:
         if not os.path.exists(file_path):
-            print(f"File not found: {file_path}")
+            st.error(f"File not found: {file_path}")
             return pd.DataFrame()
         
         df = pd.read_excel(file_path)
         
-        # Проверяем нужные колонки
-        required = ['NAV_DATE', 'PORTFOLIO', 'MANAGEMENT_COMPANY', 'ASSET', 'ISIN']
-        if all(col in df.columns for col in required):
-            df['ISIN'] = df['ISIN'].astype(str).str.strip()
-            print(f"Portfolio loaded: {len(df)} rows")
-            return df
-        else:
-            missing = [col for col in required if col not in df.columns]
-            print(f"Missing columns: {missing}")
-            return pd.DataFrame()
-    except Exception as e:
-        print(f"Error loading portfolio: {e}")
-        return pd.DataFrame()
-
-def merge_data(calendar_df, portfolio_df):
-    """Объединяет данные: берем ISIN из портфеля и ищем в календаре"""
-    if portfolio_df.empty:
-        print("Portfolio is empty")
-        return pd.DataFrame()
-    
-    if calendar_df.empty:
-        print("Calendar is empty")
-        return pd.DataFrame()
-    
-    # Создаем словарь для быстрого поиска по ISIN в календаре
-    # Для каждого ISIN запоминаем все даты с купонами
-    calendar_dict = {}
-    for _, row in calendar_df.iterrows():
-        isin = row['ISIN']
-        if isin not in calendar_dict:
-            calendar_dict[isin] = []
-        calendar_dict[isin].append({
-            'DATE': row['DATE'].strftime('%d.%m.%Y'),
-            'NAME': row.get('NAME', '')
-        })
-    
-    # Собираем результаты
-    results = []
-    found_count = 0
-    not_found_count = 0
-    
-    for _, nav_row in portfolio_df.iterrows():
-        isin = nav_row['ISIN']
-        portfolio = nav_row.get('PORTFOLIO', '')
-        asset = nav_row.get('ASSET', '')
-        management = nav_row.get('MANAGEMENT_COMPANY', '')
+        # Преобразуем дату
+        df['DATE'] = pd.to_datetime(df['DATE'], format='%d.%m.%Y', errors='coerce')
+        df = df.dropna(subset=['DATE'])
         
-        # Ищем ISIN в календаре
-        if isin in calendar_dict:
-            for event in calendar_dict[isin]:
-                results.append({
-                    'DATE': event['DATE'],
-                    'ISIN': isin,
-                    'NAME': event['NAME'],
-                    'ASSET': asset,
-                    'PORTFOLIO': portfolio,
-                    'MANAGEMENT_COMPANY': management
+        # Сортируем по дате
+        df = df.sort_values('DATE')
+        
+        return df
+    except Exception as e:
+        st.error(f"Error loading data: {e}")
+        return pd.DataFrame()
+
+# --- Функция для цветов портфелей ---
+def get_portfolio_color(portfolio_name, idx):
+    colors = [
+        '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7',
+        '#DDA0DD', '#FF8A5C', '#A8D8EA', '#FFD93D', '#6BCB77',
+        '#FF9FF3', '#54A0FF', '#5F27CD', '#FF9F43', '#00D2D3',
+        '#F368E0', '#FFC048', '#74B9FF', '#55EFC4', '#FD79A8'
+    ]
+    return colors[idx % len(colors)]
+
+# --- Загружаем данные ---
+df = load_data(DATA_FILE_PATH)
+
+if df.empty:
+    st.error("No data loaded. Please check the file path.")
+    st.stop()
+
+st.title("📅 Coupon Payment Calendar")
+
+# --- Боковая панель с фильтрами ---
+with st.sidebar:
+    st.header("🎯 Filters")
+    
+    # Получаем список всех портфелей
+    all_portfolios = sorted(df['PORTFOLIO'].unique().tolist())
+    
+    # Выбор портфелей
+    selected_portfolios = st.multiselect(
+        "Select Portfolios",
+        options=all_portfolios,
+        default=all_portfolios,
+        help="Choose one or multiple portfolios"
+    )
+    
+    st.divider()
+    
+    # Выбор УК
+    all_uk = sorted(df['MANAGEMENT_COMPANY'].unique().tolist())
+    selected_uk = st.multiselect(
+        "Select Management Companies",
+        options=all_uk,
+        default=all_uk,
+        help="Choose one or multiple management companies"
+    )
+    
+    st.divider()
+    
+    # Выбор месяца - ограничиваем только текущим месяцем и прошлыми
+    today = datetime.now()
+    current_year = today.year
+    current_month = today.month
+    
+    # Доступные года (от 2020 до текущего)
+    available_years = list(range(2020, current_year + 1))
+    year = st.selectbox(
+        "Year", 
+        available_years, 
+        index=len(available_years) - 1  # По умолчанию текущий год
+    )
+    
+    # Доступные месяцы
+    if year == current_year:
+        # Если выбран текущий год - только до текущего месяца
+        available_months = list(range(1, current_month + 1))
+    else:
+        # Если выбран прошлый год - все 12 месяцев
+        available_months = list(range(1, 13))
+    
+    month = st.selectbox(
+        "Month", 
+        available_months,
+        format_func=lambda x: calendar.month_name[x],
+        index=len(available_months) - 1  # По умолчанию последний доступный месяц
+    )
+    
+    st.divider()
+    
+    # Статистика
+    st.markdown("### 📊 Statistics")
+    filtered_df = df[
+        (df['PORTFOLIO'].isin(selected_portfolios)) &
+        (df['MANAGEMENT_COMPANY'].isin(selected_uk))
+    ]
+    st.metric("Total Coupons", len(filtered_df))
+    st.metric("Unique ISINs", filtered_df['ISIN'].nunique())
+    st.metric("Unique Portfolios", filtered_df['PORTFOLIO'].nunique())
+
+# --- Основной контент ---
+st.markdown(f"## {calendar.month_name[month]} {year}")
+
+# Фильтруем данные
+filtered_df = df[
+    (df['PORTFOLIO'].isin(selected_portfolios)) &
+    (df['MANAGEMENT_COMPANY'].isin(selected_uk))
+]
+
+# Фильтруем по месяцу
+month_start = date(year, month, 1)
+month_end = date(year, month, calendar.monthrange(year, month)[1])
+month_df = filtered_df[
+    (filtered_df['DATE'].dt.date >= month_start) & 
+    (filtered_df['DATE'].dt.date <= month_end)
+]
+
+# Группируем по дням
+events_by_day = {}
+for _, event in month_df.iterrows():
+    day = event['DATE'].day
+    if day not in events_by_day:
+        events_by_day[day] = []
+    
+    events_by_day[day].append({
+        'ISIN': event['ISIN'],
+        'ASSET': event['ASSET'],
+        'PORTFOLIO': event['PORTFOLIO'],
+        'MANAGEMENT_COMPANY': event['MANAGEMENT_COMPANY'],
+        'PAYMENT_RUB': event['PAYMENT_RUB'],
+        'NAME': event.get('NAME', '')
+    })
+
+# --- ОТОБРАЖЕНИЕ КАЛЕНДАРЯ ---
+cal = calendar.monthcalendar(year, month)
+
+# Шапка
+cols = st.columns(7)
+for i, day_name in enumerate(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']):
+    cols[i].markdown(f"**{day_name}**")
+
+# Ячейки календаря
+for week in cal:
+    cols = st.columns(7)
+    for i, day in enumerate(week):
+        with cols[i]:
+            if day == 0:
+                st.empty()
+            else:
+                if day in events_by_day:
+                    # Собираем портфели для этого дня
+                    portfolios = set()
+                    for e in events_by_day[day]:
+                        portfolios.add(e['PORTFOLIO'])
+                    
+                    # Кнопка дня - только номер
+                    if st.button(
+                        str(day),
+                        key=f"day_{year}_{month}_{day}",
+                        use_container_width=True,
+                        type="secondary"
+                    ):
+                        st.session_state.selected_day = day
+                        st.session_state.selected_events = events_by_day[day]
+                    
+                    # Цветные полоски портфелей
+                    if portfolios:
+                        bars = ""
+                        for idx, p in enumerate(portfolios):
+                            color = get_portfolio_color(p, idx)
+                            bars += f'<div style="background-color: {color}; height: 3px; border-radius: 2px; margin: 1px 0;"></div>'
+                        st.markdown(bars, unsafe_allow_html=True)
+                else:
+                    st.write(f"**{day}**")
+
+# --- ДЕТАЛИ ПО ВЫБРАННОМУ ДНЮ ---
+if hasattr(st.session_state, 'selected_day') and st.session_state.selected_day:
+    selected = st.session_state.selected_day
+    if selected in events_by_day:
+        st.divider()
+        st.markdown(f"### 📋 Coupons for {selected} {calendar.month_name[month]} {year}")
+        
+        if events_by_day[selected]:
+            # Подготовка данных для таблицы
+            data = []
+            for event in events_by_day[selected]:
+                data.append({
+                    'ASSET': event['ASSET'],
+                    'PORTFOLIO': event['PORTFOLIO'],
+                    'MANAGEMENT_COMPANY': event['MANAGEMENT_COMPANY'],
+                    'Payment (RUB)': event['PAYMENT_RUB'],
+                    'ISIN': event['ISIN']
                 })
-            found_count += 1
-        else:
-            not_found_count += 1
-    
-    df_result = pd.DataFrame(results)
-    print(f"\nISINs found in calendar: {found_count}")
-    print(f"ISINs NOT found in calendar: {not_found_count}")
-    print(f"Total records with coupons: {len(df_result)}")
-    
-    return df_result
+            
+            df_day = pd.DataFrame(data)
+            
+            # Показываем таблицу
+            st.dataframe(
+                df_day,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    'Payment (RUB)': st.column_config.NumberColumn(
+                        format="%.2f ₽"
+                    ),
+                    'ISIN': st.column_config.TextColumn(
+                        width='small'
+                    )
+                }
+            )
+            
+            # Статистика по портфелям
+            st.caption(f"Total coupons: {len(events_by_day[selected])}")
+            
+            # Breakdown по портфелям
+            portfolio_counts = {}
+            for event in events_by_day[selected]:
+                p = event['PORTFOLIO']
+                portfolio_counts[p] = portfolio_counts.get(p, 0) + 1
+            
+            if portfolio_counts:
+                st.caption("Breakdown by Portfolio:")
+                for p, count in portfolio_counts.items():
+                    color = get_portfolio_color(p, list(portfolio_counts.keys()).index(p))
+                    st.markdown(
+                        f'<div style="display: flex; align-items: center; gap: 8px; margin: 2px 0;">'
+                        f'<div style="background-color: {color}; width: 12px; height: 12px; border-radius: 3px;"></div>'
+                        f'<span>{p}: {count} coupon(s)</span>'
+                        f'</div>',
+                        unsafe_allow_html=True
+                    )
 
-def main():
-    print("=" * 60)
-    print("Coupon Events Generator (Information only)")
-    print("=" * 60)
-    
-    print("\n1. Loading calendar...")
-    calendar_df = load_calendar(CALENDAR_FILE_PATH)
-    
-    print("\n2. Loading portfolio (NAV)...")
-    portfolio_df = load_portfolio(PORTFOLIO_FILE_PATH)
-    
-    if portfolio_df.empty:
-        print("ERROR: Portfolio is empty. Stopping.")
-        return
-    
-    if calendar_df.empty:
-        print("ERROR: Calendar is empty. Stopping.")
-        return
-    
-    print(f"\n3. Matching ISINs from portfolio to calendar...")
-    result_df = merge_data(calendar_df, portfolio_df)
-    
-    if result_df.empty:
-        print("ERROR: No data after merge. Stopping.")
-        return
-    
-    # Сортируем по дате
-    result_df['DATE_SORT'] = pd.to_datetime(result_df['DATE'], format='%d.%m.%Y')
-    result_df = result_df.sort_values('DATE_SORT')
-    result_df = result_df.drop('DATE_SORT', axis=1)
-    
-    # Сохраняем результат
-    print(f"\n4. Saving result to: {OUTPUT_FILE_PATH}")
-    result_df.to_excel(OUTPUT_FILE_PATH, index=False)
-    
-    # Выводим статистику
-    print("\n" + "=" * 60)
-    print("SUMMARY")
-    print("=" * 60)
-    print(f"Total ISINs in portfolio: {len(portfolio_df)}")
-    print(f"Total coupon events found: {len(result_df)}")
-    print(f"Unique ISINs with coupons: {result_df['ISIN'].nunique()}")
-    print(f"Unique Portfolios: {result_df['PORTFOLIO'].nunique()}")
-    print(f"Unique Management Companies: {result_df['MANAGEMENT_COMPANY'].nunique()}")
-    
-    # Показываем пример
-    print("\nSample data (first 10 rows):")
-    print(result_df.head(10).to_string())
-    
-    print(f"\n✅ Done! File saved to: {OUTPUT_FILE_PATH}")
+# --- Легенда портфелей ---
+# Собираем все портфели в отфильтрованных данных
+shown_portfolios = set()
+for day_events in events_by_day.values():
+    for e in day_events:
+        shown_portfolios.add(e['PORTFOLIO'])
 
-if __name__ == "__main__":
-    main()
+if shown_portfolios:
+    st.divider()
+    st.markdown("### 🎨 Legend")
+    cols = st.columns(min(len(shown_portfolios), 5))
+    for idx, p in enumerate(sorted(shown_portfolios)):
+        with cols[idx % len(cols)]:
+            color = get_portfolio_color(p, idx)
+            st.markdown(
+                f'<div style="display: flex; align-items: center; gap: 8px;">'
+                f'<div style="background-color: {color}; width: 16px; height: 16px; border-radius: 4px;"></div>'
+                f'<span style="font-size: 13px;">{p}</span>'
+                f'</div>',
+                unsafe_allow_html=True
+            )
+
+# --- Информация о данных ---
+st.divider()
+st.caption(f"📊 Data source: {os.path.basename(DATA_FILE_PATH)} | Total records: {len(df)}")
