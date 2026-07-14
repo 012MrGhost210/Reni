@@ -30,9 +30,6 @@ def load_calendar(file_path):
         df = df[df['ISIN'] != 'null']
         df = df[df['ISIN'] != '']
         
-        # Приводим PAYMENT_RUB к числовому формату
-        df['PAYMENT_RUB'] = pd.to_numeric(df['PAYMENT_RUB'], errors='coerce')
-        
         print(f"Calendar loaded: {len(df)} rows")
         return df
     except Exception as e:
@@ -73,15 +70,15 @@ def merge_data(calendar_df, portfolio_df):
         return pd.DataFrame()
     
     # Создаем словарь для быстрого поиска по ISIN в календаре
+    # Для каждого ISIN запоминаем все даты с купонами
     calendar_dict = {}
     for _, row in calendar_df.iterrows():
         isin = row['ISIN']
         if isin not in calendar_dict:
             calendar_dict[isin] = []
         calendar_dict[isin].append({
-            'DATE': row['DATE'],
-            'NAME': row.get('NAME', ''),
-            'PAYMENT_RUB': row.get('PAYMENT_RUB', 0)
+            'DATE': row['DATE'].strftime('%d.%m.%Y'),
+            'NAME': row.get('NAME', '')
         })
     
     # Собираем результаты
@@ -98,18 +95,13 @@ def merge_data(calendar_df, portfolio_df):
         # Ищем ISIN в календаре
         if isin in calendar_dict:
             for event in calendar_dict[isin]:
-                # Пропускаем, если выплата = 0 или NaN
-                if pd.isna(event['PAYMENT_RUB']) or event['PAYMENT_RUB'] <= 0:
-                    continue
-                    
                 results.append({
-                    'DATE': event['DATE'].strftime('%d.%m.%Y'),
+                    'DATE': event['DATE'],
                     'ISIN': isin,
                     'NAME': event['NAME'],
                     'ASSET': asset,
                     'PORTFOLIO': portfolio,
-                    'MANAGEMENT_COMPANY': management,
-                    'PAYMENT_RUB': event['PAYMENT_RUB']
+                    'MANAGEMENT_COMPANY': management
                 })
             found_count += 1
         else:
@@ -118,13 +110,13 @@ def merge_data(calendar_df, portfolio_df):
     df_result = pd.DataFrame(results)
     print(f"\nISINs found in calendar: {found_count}")
     print(f"ISINs NOT found in calendar: {not_found_count}")
-    print(f"Total merged records: {len(df_result)}")
+    print(f"Total records with coupons: {len(df_result)}")
     
     return df_result
 
 def main():
     print("=" * 60)
-    print("Coupon Events Generator")
+    print("Coupon Events Generator (Information only)")
     print("=" * 60)
     
     print("\n1. Loading calendar...")
@@ -141,7 +133,7 @@ def main():
         print("ERROR: Calendar is empty. Stopping.")
         return
     
-    print(f"\n3. Merging data (matching ISINs from portfolio to calendar)...")
+    print(f"\n3. Matching ISINs from portfolio to calendar...")
     result_df = merge_data(calendar_df, portfolio_df)
     
     if result_df.empty:
