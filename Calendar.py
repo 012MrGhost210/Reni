@@ -41,11 +41,11 @@ import os
 # ============================================================
 # НАСТРАИВАЕМЫЕ ПАРАМЕТРЫ - отредактируйте пути к вашим файлам
 # ============================================================
-# Путь к файлу календаря
-CALENDAR_FILE_PATH = "Календарь (3).csv"
+# Путь к файлу календаря (XLSX)
+CALENDAR_FILE_PATH = "Календарь (3).xlsx"
 
-# Путь к файлу портфеля X (должен содержать колонки: NAV_DATE, PORTFOLIO, MANAGEMENT_COMPANY, ASSET, ISIN)
-PORTFOLIO_FILE_PATH = "portfolio_x.csv"
+# Путь к файлу портфеля X (XLSX) - должен содержать колонки: NAV_DATE, PORTFOLIO, MANAGEMENT_COMPANY, ASSET, ISIN
+PORTFOLIO_FILE_PATH = "portfolio_x.xlsx"
 # ============================================================
 
 # --- Page config ---
@@ -57,16 +57,19 @@ st.set_page_config(
 
 # --- Helper Functions ---
 def load_calendar_from_path(file_path):
-    """Load calendar data from a file path"""
+    """Load calendar data from a file path (XLSX)"""
     try:
         if not os.path.exists(file_path):
             return pd.DataFrame(), f"File not found: {file_path}"
         
-        df = pd.read_csv(file_path, sep=';', encoding='utf-8-sig', skiprows=3)
+        # Читаем XLSX файл
+        df = pd.read_excel(file_path, skiprows=3)
+        
+        # Переименовываем колонки
         df.columns = ['ISIN', 'NAME', 'VOLUME', 'DATE', 'NOMINAL', 'CURRENCY', 
                      'OUTSTANDING_NOMINAL', 'COUPON_RATE', 'PAYMENT', 'PAYMENT_RUB']
         
-        df['DATE'] = pd.to_datetime(df['DATE'], format='%d.%m.%Y', errors='coerce')
+        df['DATE'] = pd.to_datetime(df['DATE'], errors='coerce')
         df = df.dropna(subset=['DATE'])
         df['ISIN'] = df['ISIN'].astype(str).str.strip()
         df = df[df['ISIN'] != 'null']
@@ -78,12 +81,13 @@ def load_calendar_from_path(file_path):
         return pd.DataFrame(), f"Error loading calendar file: {e}"
 
 def load_portfolio_from_path(file_path):
-    """Load portfolio data from a file path"""
+    """Load portfolio data from a file path (XLSX)"""
     try:
         if not os.path.exists(file_path):
             return pd.DataFrame(), f"File not found: {file_path}"
         
-        df = pd.read_csv(file_path)
+        # Читаем XLSX файл
+        df = pd.read_excel(file_path)
         
         # Проверяем только те колонки, которые указал пользователь
         required_cols = ['NAV_DATE', 'PORTFOLIO', 'MANAGEMENT_COMPANY', 'ASSET', 'ISIN']
@@ -99,14 +103,17 @@ def load_portfolio_from_path(file_path):
 
 @st.cache_data
 def load_calendar_file(uploaded_file):
-    """Load calendar data from uploaded file"""
+    """Load calendar data from uploaded file (XLSX)"""
     if uploaded_file is not None:
         try:
-            df = pd.read_csv(uploaded_file, sep=';', encoding='utf-8-sig', skiprows=3)
+            # Читаем XLSX файл
+            df = pd.read_excel(uploaded_file, skiprows=3)
+            
+            # Переименовываем колонки
             df.columns = ['ISIN', 'NAME', 'VOLUME', 'DATE', 'NOMINAL', 'CURRENCY', 
                          'OUTSTANDING_NOMINAL', 'COUPON_RATE', 'PAYMENT', 'PAYMENT_RUB']
             
-            df['DATE'] = pd.to_datetime(df['DATE'], format='%d.%m.%Y', errors='coerce')
+            df['DATE'] = pd.to_datetime(df['DATE'], errors='coerce')
             df = df.dropna(subset=['DATE'])
             df['ISIN'] = df['ISIN'].astype(str).str.strip()
             df = df[df['ISIN'] != 'null']
@@ -121,10 +128,11 @@ def load_calendar_file(uploaded_file):
 
 @st.cache_data
 def load_portfolio_file(uploaded_file):
-    """Load portfolio data from uploaded file"""
+    """Load portfolio data from uploaded file (XLSX)"""
     if uploaded_file is not None:
         try:
-            df = pd.read_csv(uploaded_file)
+            # Читаем XLSX файл
+            df = pd.read_excel(uploaded_file)
             
             # Проверяем только те колонки, которые указал пользователь
             required_cols = ['NAV_DATE', 'PORTFOLIO', 'MANAGEMENT_COMPANY', 'ASSET', 'ISIN']
@@ -258,14 +266,14 @@ with st.sidebar:
     st.caption("Upload files manually if you don't want to use the configured paths")
     
     calendar_file = st.file_uploader(
-        "Upload calendar CSV",
-        type=['csv'],
+        "Upload calendar XLSX",
+        type=['xlsx'],
         key="calendar_uploader"
     )
     
     portfolio_file = st.file_uploader(
-        "Upload portfolio CSV",
-        type=['csv'],
+        "Upload portfolio XLSX",
+        type=['xlsx'],
         key="portfolio_uploader"
     )
     
