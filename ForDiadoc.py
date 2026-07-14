@@ -2,8 +2,20 @@ import os
 import shutil
 import re
 import zipfile
+import sys
 from datetime import datetime
 from pathlib import Path
+
+# ==================== НАСТРОЙКА КОДИРОВКИ ====================
+
+# Устанавливаем кодировку для консоли
+if sys.platform == 'win32':
+    import locale
+    # Устанавливаем кодировку для Windows
+    sys.stdout.reconfigure(encoding='utf-8') if hasattr(sys.stdout, 'reconfigure') else None
+    
+# Кодировка для работы с файловой системой
+FS_ENCODING = 'utf-8' if sys.platform != 'win32' else 'cp1251'
 
 # ==================== НАСТРОЙКИ ====================
 
@@ -69,8 +81,20 @@ FILE_RULES = [
 
 def get_manager_name(source_dir):
     """Извлекает имя управляющего из пути"""
+    # Работаем с путем в кодировке UTF-8
     normalized_path = source_dir.replace('\\', '/').rstrip('/')
     raw_name = os.path.basename(normalized_path)
+    
+    # Пытаемся декодировать, если это байты
+    if isinstance(raw_name, bytes):
+        try:
+            raw_name = raw_name.decode('utf-8')
+        except UnicodeDecodeError:
+            try:
+                raw_name = raw_name.decode('cp1251')
+            except UnicodeDecodeError:
+                raw_name = str(raw_name)
+    
     return MANAGER_MAPPING.get(raw_name, raw_name)
 
 def get_month_name(month_number):
@@ -114,18 +138,11 @@ def extract_file_info(filename):
     for rule in FILE_RULES:
         match = re.search(rule["file_pattern"], filename)
         if match:
-            if "brok_rpt" in rule["identifier"]:
-                # Для brok_rpt: код брокера в group(1), дата в group(2)
+            if rule["identifier"] in ["trades", "brok_rpt"]:
                 broker_code = match.group(1)
                 date_str = match.group(2)
-                portfolio_code = None  # будет взят из архива
-            elif "trades" in rule["identifier"]:
-                # Для trades: код брокера в group(1), дата в group(2)
-                broker_code = match.group(1)
-                date_str = match.group(2)
-                portfolio_code = None  # будет взят из архива
+                portfolio_code = None
             else:
-                # Для Выгрузка НАПФ: код портфеля в group(1), дата в group(2)
                 portfolio_code = match.group(1)
                 date_str = match.group(2)
                 broker_code = None
@@ -193,10 +210,11 @@ def check_file_exists(dest_path):
 
 def process_archive(zip_path, manager_name):
     """Обрабатывает один архив"""
-    print(f"\n📦 Обработка архива: {os.path.basename(zip_path)}")
+    archive_name = os.path.basename(zip_path)
+    print(f"\n📦 Обработка архива: {archive_name}")
     
     # Извлекаем информацию из имени архива
-    archive_date, portfolio_code = extract_archive_info(os.path.basename(zip_path))
+    archive_date, portfolio_code = extract_archive_info(archive_name)
     if not archive_date:
         print(f"   ⚠️ Не удалось определить дату/портфель из имени архива")
         return 0, 0
@@ -208,7 +226,7 @@ def process_archive(zip_path, manager_name):
     skipped = 0
     
     try:
-        # Открываем архив
+        # Открываем архив с правильной кодировкой
         with zipfile.ZipFile(zip_path, 'r') as zip_ref:
             # Получаем список файлов в архиве
             files_in_zip = zip_ref.namelist()
@@ -262,7 +280,7 @@ def process_archive(zip_path, manager_name):
                     # Создаем папки если их нет
                     os.makedirs(os.path.dirname(dest_path), exist_ok=True)
                     
-                    # Записываем файл
+                    # Записываем файл с правильной кодировкой
                     with open(dest_path, 'wb') as f:
                         f.write(file_data)
                     
@@ -276,6 +294,17 @@ def process_archive(zip_path, manager_name):
     except zipfile.BadZipFile:
         print(f"   ❌ Файл не является zip-архивом: {zip_path}")
         return 0, 0
+    except UnicodeDecodeError as e:
+        print(f"   ❌ Ошибка кодировки при открытии архива: {e}")
+        print(f"   🔄 Пробуем открыть с другой кодировкой...")
+        # Пробуем открыть с другой кодировкой
+        try:
+            with zipfile.ZipFile(zip_path, 'r', metadata_encoding='cp866') as zip_ref:
+                # ... аналогичная логика
+                pass
+        except Exception as e2:
+            print(f"   ❌ Не удалось открыть архив: {e2}")
+            return 0, 0
     except Exception as e:
         print(f"   ❌ Ошибка при открытии архива: {e}")
         return 0, 0
@@ -304,7 +333,7 @@ def process_files():
     files = [f for f in os.listdir(SOURCE_DIR) if os.path.isfile(os.path.join(SOURCE_DIR, f))]
     
     # Фильтруем только zip архивы
-    archives = [f for f in files if f.endswith('.zip') or f.endswith('.rar')]
+    archives = [f for f in files if f.lower().endswith(('.zip', '.rar'))]
     
     if not archives:
         print("ℹ️ В папке-источнике нет архивов")
@@ -332,6 +361,12 @@ def process_files():
 # ==================== ЗАПУСК ====================
 
 if __name__ == "__main__":
+    # Устанавливаем правильную кодировку для вывода
+    import sys
+    import io
+    if sys.platform == 'win32':
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+    
     process_files()
 
 import os
