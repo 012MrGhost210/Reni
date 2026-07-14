@@ -86,30 +86,25 @@ with st.sidebar:
     
     st.divider()
     
-    # Выбор месяца - ограничиваем только текущим месяцем и прошлыми
-    today = datetime.now()
-    current_year = today.year
-    current_month = today.month
+    # Выбор месяца - теперь можно выбрать любой год и месяц из данных
+    # Получаем минимальную и максимальную дату в данных
+    min_date = df['DATE'].min()
+    max_date = df['DATE'].max()
     
-    # Доступные года (от 2020 до текущего)
-    available_years = list(range(2020, current_year + 1))
+    # Доступные года (от минимального до максимального в данных)
+    available_years = list(range(min_date.year, max_date.year + 1))
     year = st.selectbox(
         "Год", 
         available_years, 
-        index=len(available_years) - 1
+        index=len(available_years) - 1  # По умолчанию последний доступный год
     )
     
-    # Доступные месяцы
-    if year == current_year:
-        available_months = list(range(1, current_month + 1))
-    else:
-        available_months = list(range(1, 13))
-    
+    # Доступные месяцы (все 12)
     month = st.selectbox(
         "Месяц", 
-        available_months,
+        list(range(1, 13)),
         format_func=lambda x: calendar.month_name[x],
-        index=len(available_months) - 1
+        index=datetime.now().month - 1  # По умолчанию текущий месяц
     )
     
     st.divider()
