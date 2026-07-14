@@ -1,21 +1,338 @@
-\\fs-01.renlife.com\alldocs\Инвестиционный департамент\7.0 Treasury\Diadoc\diadoc_connector\Документооборот завершен\7702358512-ООО -УК Райффайзен- - это где теперь искать архив
-{Документооборот завершен}Брокер_напф_прочие_06072026_256 - вот архив из которого нужно доставать файлы
-Брокер_напф_прочие_ДДММГГГГ_*код портфеля* - вот логика нейминга архива
-06072026 - это дата
-256 - это код портфеля
-256  Выгрузка НАПФ 20260603.xml - пример искомого файла
-*код портфеля*  Выгрузка НАПФ *ГГГГММДД*.xml - логика файла
-M:\Финансовый департамент\Treasury\Отчеты Брокера и Спецдепозитария\10.НАПФ - Ценные бумаги\*ГГГГ*\*Управляющий*\*Портфель*\*Месяц*\
-M:\Финансовый департамент\Treasury\Отчеты Брокера и Спецдепозитария\10.НАПФ - Ценные бумаги\2026\УК Райффайзен капитал\256\5.Май - пример каким должен быть путь
-Так и в этом же архиве будут другие файлы, вот их логика:
-82748_trades_20260604_063304 - это искомый файл
-*код брокерского согалшения*_trades_*ГГГГММДД*_063304 - логика его нейминга (063304 - внимание не обращать цифры рандомные)
-M:\Финансовый департамент\Treasury\Отчеты Брокера и Спецдепозитария\2 Отчеты брокера\*ГГГГ*\*Месяц*\*Управляющий*\*Портфель* - логика формирования пути для записи
-M:\Финансовый департамент\Treasury\Отчеты Брокера и Спецдепозитария\2 Отчеты брокера\2026\06.Июнь 2026\Райффайзен Капитал\Брокер Райффазенбанк\256-03.1-ДУ24_82748 - пример верного пути
-brok_rpt_82748_20260603_063305_final - это новый тип файла
-brok_rpt_*код брокерского соглашения*_*ГГГГММДД*_063305_final - логика нейминга
-M:\Финансовый департамент\Treasury\Отчеты Брокера и Спецдепозитария\2 Отчеты брокера\*ГГГГ*\*Месяц*\*Управляющий*\*Портфель* - логика пути
-M:\Финансовый департамент\Treasury\Отчеты Брокера и Спецдепозитария\2 Отчеты брокера\2026\06.Июнь 2026\Райффайзен Капитал\Брокер Райффазенбанк\256-03.1-ДУ24_82748 - пример пути
+import os
+import shutil
+import re
+import zipfile
+from datetime import datetime
+from pathlib import Path
+
+# ==================== НАСТРОЙКИ ====================
+
+# Базовый путь назначения
+BASE_DEST_DIR = r"M:\Финансовый департамент\Treasury\Отчеты Брокера и Спецдепозитария"
+
+# Папка-источник с архивами
+SOURCE_DIR = r"\\fs-01.renlife.com\alldocs\Инвестиционный департамент\7.0 Treasury\Diadoc\diadoc_connector\Документооборот завершен\7702358512-ООО -УК Райффайзен-"
+
+# Маппинг названий управляющих (исходное -> красивое)
+MANAGER_MAPPING = {
+    "7702358512-ООО -УК Райффайзен-": "Райффайзен Капитал",
+    # Добавляй других управляющих сюда
+}
+
+# Маппинг брокеров
+BROKER_MAPPING = {
+    "82748": "Брокер Райффазенбанк",
+    # Добавляй других брокеров сюда
+}
+
+# Разрешенные расширения файлов в архиве
+ALLOWED_EXTENSIONS = {'.xml', '.txt', '.csv', '.xlsx', '.xls'}
+
+# ==================== КОНФИГУРАЦИЯ ====================
+
+# Правила для архивов
+ARCHIVE_RULES = [
+    {
+        # Правило 1: Архив с Брокер_напф_прочие
+        "archive_pattern": "{Документооборот завершен}Брокер_напф_прочие_",
+        "archive_regex": r"Брокер_напф_прочие_(\d{8})_(\d+)",  # дата + код портфеля
+        "archive_date_format": "%d%m%Y",
+    }
+]
+
+# Правила для файлов внутри архива
+FILE_RULES = [
+    {
+        # Правило 1: XML файл "Выгрузка НАПФ"
+        "file_pattern": r"(\d+)\s+Выгрузка НАПФ\s+(\d{8})\.xml",
+        "file_date_format": "%Y%m%d",
+        "destination_template": r"10.НАПФ - Ценные бумаги\*ГГГГ*\*Управляющий*\*Портфель*\*Месяц*",
+        "identifier": "Выгрузка НАПФ",
+    },
+    {
+        # Правило 2: trades файл
+        "file_pattern": r"(\d+)_trades_(\d{8})_\d+",
+        "file_date_format": "%Y%m%d",
+        "destination_template": r"2 Отчеты брокера\*ГГГГ*\*Месяц*\*Управляющий*\*Портфель*",
+        "identifier": "trades",
+    },
+    {
+        # Правило 3: brok_rpt файл
+        "file_pattern": r"brok_rpt_(\d+)_(\d{8})_\d+_final",
+        "file_date_format": "%Y%m%d",
+        "destination_template": r"2 Отчеты брокера\*ГГГГ*\*Месяц*\*Управляющий*\*Портфель*",
+        "identifier": "brok_rpt",
+    },
+]
+
+# ==================== ОСНОВНАЯ ЛОГИКА ====================
+
+def get_manager_name(source_dir):
+    """Извлекает имя управляющего из пути"""
+    normalized_path = source_dir.replace('\\', '/').rstrip('/')
+    raw_name = os.path.basename(normalized_path)
+    return MANAGER_MAPPING.get(raw_name, raw_name)
+
+def get_month_name(month_number):
+    """Возвращает название месяца на русском"""
+    months = {
+        1: "Январь", 2: "Февраль", 3: "Март",
+        4: "Апрель", 5: "Май", 6: "Июнь",
+        7: "Июль", 8: "Август", 9: "Сентябрь",
+        10: "Октябрь", 11: "Ноябрь", 12: "Декабрь"
+    }
+    return months.get(month_number, "")
+
+def format_month_folder(date_obj):
+    """Форматирует папку месяца: 06.Июнь 2026"""
+    month_num = f"{date_obj.month:02d}"
+    month_name = get_month_name(date_obj.month)
+    year = date_obj.year
+    return f"{month_num}.{month_name} {year}"
+
+def extract_archive_info(filename):
+    """Извлекает дату и код портфеля из имени архива"""
+    for rule in ARCHIVE_RULES:
+        if not filename.startswith(rule["archive_pattern"]):
+            continue
+        
+        # Ищем дату и код портфеля
+        match = re.search(rule["archive_regex"], filename)
+        if match:
+            date_str = match.group(1)
+            portfolio_code = match.group(2)
+            try:
+                date_obj = datetime.strptime(date_str, rule["archive_date_format"])
+                return date_obj, portfolio_code
+            except ValueError:
+                continue
+    
+    return None, None
+
+def extract_file_info(filename):
+    """Извлекает информацию из имени файла внутри архива"""
+    for rule in FILE_RULES:
+        match = re.search(rule["file_pattern"], filename)
+        if match:
+            if "brok_rpt" in rule["identifier"]:
+                # Для brok_rpt: код брокера в group(1), дата в group(2)
+                broker_code = match.group(1)
+                date_str = match.group(2)
+                portfolio_code = None  # будет взят из архива
+            elif "trades" in rule["identifier"]:
+                # Для trades: код брокера в group(1), дата в group(2)
+                broker_code = match.group(1)
+                date_str = match.group(2)
+                portfolio_code = None  # будет взят из архива
+            else:
+                # Для Выгрузка НАПФ: код портфеля в group(1), дата в group(2)
+                portfolio_code = match.group(1)
+                date_str = match.group(2)
+                broker_code = None
+            
+            try:
+                date_obj = datetime.strptime(date_str, rule["file_date_format"])
+                return date_obj, portfolio_code, broker_code, rule
+            except ValueError:
+                continue
+    
+    return None, None, None, None
+
+def build_destination_path(date_obj, rule, manager_name, portfolio_code, broker_code, original_filename):
+    """Строит путь назначения для файла"""
+    year = str(date_obj.year)
+    month_folder = format_month_folder(date_obj)
+    
+    # Получаем шаблон пути
+    dest_path = rule["destination_template"]
+    
+    # Определяем портфель для пути
+    portfolio_folder = portfolio_code if portfolio_code else broker_code
+    
+    # Заменяем переменные
+    dest_path = dest_path.replace("*ГГГГ*", year)
+    dest_path = dest_path.replace("*Месяц*", month_folder)
+    dest_path = dest_path.replace("*Управляющий*", manager_name)
+    dest_path = dest_path.replace("*Портфель*", portfolio_folder)
+    
+    # Полный путь
+    full_path = os.path.join(BASE_DEST_DIR, dest_path)
+    
+    # Создаем папки
+    Path(full_path).mkdir(parents=True, exist_ok=True)
+    
+    return os.path.join(full_path, original_filename)
+
+def normalize_filename(filename):
+    """Нормализует имя файла для сравнения"""
+    name_without_ext, ext = os.path.splitext(filename)
+    for char in ['+', ' ', '_', '-']:
+        name_without_ext = name_without_ext.replace(char, '')
+    return name_without_ext.lower() + ext
+
+def check_file_exists(dest_path):
+    """Проверяет, существует ли файл"""
+    dest_dir = os.path.dirname(dest_path)
+    target_filename = os.path.basename(dest_path)
+    
+    if not os.path.exists(dest_dir):
+        return False
+    
+    target_normalized = normalize_filename(target_filename)
+    
+    try:
+        existing_files = [f for f in os.listdir(dest_dir) if os.path.isfile(os.path.join(dest_dir, f))]
+    except PermissionError:
+        return False
+    
+    for existing_file in existing_files:
+        if normalize_filename(existing_file) == target_normalized:
+            return True
+    
+    return False
+
+def process_archive(zip_path, manager_name):
+    """Обрабатывает один архив"""
+    print(f"\n📦 Обработка архива: {os.path.basename(zip_path)}")
+    
+    # Извлекаем информацию из имени архива
+    archive_date, portfolio_code = extract_archive_info(os.path.basename(zip_path))
+    if not archive_date:
+        print(f"   ⚠️ Не удалось определить дату/портфель из имени архива")
+        return 0, 0
+    
+    print(f"   📅 Дата архива: {archive_date.strftime('%d.%m.%Y')}")
+    print(f"   📁 Портфель: {portfolio_code}")
+    
+    processed = 0
+    skipped = 0
+    
+    try:
+        # Открываем архив
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            # Получаем список файлов в архиве
+            files_in_zip = zip_ref.namelist()
+            print(f"   📄 Найдено файлов в архиве: {len(files_in_zip)}")
+            
+            for filename in files_in_zip:
+                # Проверяем расширение
+                ext = os.path.splitext(filename)[1].lower()
+                if ALLOWED_EXTENSIONS and ext not in ALLOWED_EXTENSIONS:
+                    print(f"      ⏭️ Пропускаем (неподдерживаемое расширение): {filename}")
+                    skipped += 1
+                    continue
+                
+                # Извлекаем информацию из имени файла
+                file_date, file_portfolio, broker_code, rule = extract_file_info(filename)
+                
+                if not file_date:
+                    print(f"      ⚠️ Не удалось распознать файл: {filename}")
+                    skipped += 1
+                    continue
+                
+                # Определяем код портфеля (из архива или из файла)
+                final_portfolio = portfolio_code if portfolio_code else file_portfolio
+                
+                if not final_portfolio:
+                    print(f"      ⚠️ Не удалось определить портфель для: {filename}")
+                    skipped += 1
+                    continue
+                
+                # Для brok_rpt и trades используем broker_code как портфель
+                if rule["identifier"] in ["trades", "brok_rpt"]:
+                    final_portfolio = broker_code
+                
+                # Строим путь назначения
+                dest_path = build_destination_path(
+                    file_date, rule, manager_name, 
+                    final_portfolio, broker_code, filename
+                )
+                
+                # Проверяем, существует ли файл
+                if check_file_exists(dest_path):
+                    print(f"      ⏭️ Файл уже существует: {filename}")
+                    skipped += 1
+                    continue
+                
+                # Извлекаем файл из архива
+                try:
+                    # Читаем файл из архива
+                    file_data = zip_ref.read(filename)
+                    
+                    # Создаем папки если их нет
+                    os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+                    
+                    # Записываем файл
+                    with open(dest_path, 'wb') as f:
+                        f.write(file_data)
+                    
+                    print(f"      ✅ {filename}")
+                    print(f"         -> {dest_path}")
+                    processed += 1
+                except Exception as e:
+                    print(f"      ❌ Ошибка при извлечении {filename}: {e}")
+                    skipped += 1
+                    
+    except zipfile.BadZipFile:
+        print(f"   ❌ Файл не является zip-архивом: {zip_path}")
+        return 0, 0
+    except Exception as e:
+        print(f"   ❌ Ошибка при открытии архива: {e}")
+        return 0, 0
+    
+    return processed, skipped
+
+def process_files():
+    """Основная функция обработки"""
+    print("=" * 70)
+    print("📁 Начинаем обработку архивов")
+    print(f"📂 Источник: {SOURCE_DIR}")
+    print(f"📂 Назначение: {BASE_DEST_DIR}")
+    print("=" * 70)
+    
+    # Проверяем существование папки-источника
+    if not os.path.exists(SOURCE_DIR):
+        print(f"❌ Папка-источник не найдена: {SOURCE_DIR}")
+        return
+    
+    # Получаем имя управляющего
+    manager_name = get_manager_name(SOURCE_DIR)
+    print(f"👤 Управляющий: {manager_name}")
+    print("=" * 70)
+    
+    # Получаем список архивов
+    files = [f for f in os.listdir(SOURCE_DIR) if os.path.isfile(os.path.join(SOURCE_DIR, f))]
+    
+    # Фильтруем только zip архивы
+    archives = [f for f in files if f.endswith('.zip') or f.endswith('.rar')]
+    
+    if not archives:
+        print("ℹ️ В папке-источнике нет архивов")
+        return
+    
+    print(f"📄 Найдено архивов: {len(archives)}")
+    print("=" * 70)
+    
+    total_processed = 0
+    total_skipped = 0
+    
+    for archive_name in archives:
+        archive_path = os.path.join(SOURCE_DIR, archive_name)
+        processed, skipped = process_archive(archive_path, manager_name)
+        total_processed += processed
+        total_skipped += skipped
+    
+    # Итоги
+    print("\n" + "=" * 70)
+    print("📊 ИТОГ:")
+    print(f"   ✅ Извлечено файлов: {total_processed}")
+    print(f"   ⏭️ Пропущено: {total_skipped}")
+    print("=" * 70)
+
+# ==================== ЗАПУСК ====================
+
+if __name__ == "__main__":
+    process_files()
 
 import os
 import shutil
