@@ -16,7 +16,7 @@ if sys.platform == 'win32':
 # ==================== НАСТРОЙКИ ====================
 
 # Базовый путь назначения
-BASE_DEST_DIR = r"M:\Финансовый департамент\Treasury\Отчеты Брокера и Спецдепозитария"
+BASE_DEST_DIR = r"M:\Финансовый департамент\Treasury\Отчеты Брокера и Спецдепозитария\test2"
 
 # Папка-источник с архивами
 SOURCE_DIR = r"\\fs-01.renlife.com\alldocs\Инвестиционный департамент\7.0 Treasury\Diadoc\diadoc_connector\Документооборот завершен\7702358512-ООО -УК Райффайзен-"
@@ -35,6 +35,9 @@ BROKER_MAPPING = {
 
 # Разрешенные расширения файлов в архиве
 ALLOWED_EXTENSIONS = {'.xml', '.txt', '.csv', '.xlsx', '.xls', '.pdf'}
+
+# Кодировка имен файлов внутри zip-архивов (DOS-архиваторы под Windows пишут cp866)
+ZIP_METADATA_ENCODING = 'cp866'
 
 # ==================== КОНФИГУРАЦИЯ ====================
 
@@ -72,52 +75,31 @@ FILE_RULES = [
     },
 ]
 
-# Кодировки для попытки декодирования имен файлов в архиве
-ZIP_ENCODINGS = ['cp866', 'cp1251', 'utf-8', 'koi8-r']
-
 # ==================== ОСНОВНАЯ ЛОГИКА ====================
 
-def decode_zip_filename(encoded_name):
-    """Пытается декодировать имя файла из архива с разными кодировками"""
-    if isinstance(encoded_name, str):
-        # Если уже строка, пробуем перекодировать
-        try:
-            # Пробуем декодировать как байты
-            encoded_bytes = encoded_name.encode('latin-1')
-            for encoding in ZIP_ENCODINGS:
-                try:
-                    decoded = encoded_bytes.decode(encoding)
-                    return decoded
-                except UnicodeDecodeError:
-                    continue
-        except:
-            pass
-        return encoded_name
-    
-    # Если это байты
-    for encoding in ZIP_ENCODINGS:
-        try:
-            return encoded_name.decode(encoding)
-        except UnicodeDecodeError:
-            continue
-    
-    # Если ничего не помогло
-    return str(encoded_name)
+def decode_zip_filename(name, flag_bits=0):
+    """
+    Восстанавливает имя файла из архива.
+
+    Модуль zipfile по спецификации ZIP декодирует имена как cp437,
+    если не установлен UTF-8 флаг. Русские архиваторы под Windows
+    обычно пишут имена в cp866 — поэтому перекодируем cp437 -> cp866.
+    """
+    # Если установлен UTF-8 флаг (бит 11) — имя уже корректное
+    if flag_bits & 0x800:
+        return name
+
+    try:
+        # Возвращаем исходные байты (cp437) и декодируем правильно (cp866)
+        return name.encode('cp437').decode(ZIP_METADATA_ENCODING)
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        # Имя не было в cp437/cp866 — оставляем как есть
+        return name
 
 def get_manager_name(source_dir):
     """Извлекает имя управляющего из пути"""
     normalized_path = source_dir.replace('\\', '/').rstrip('/')
     raw_name = os.path.basename(normalized_path)
-    
-    # Пытаемся декодировать
-    if isinstance(raw_name, bytes):
-        for encoding in ZIP_ENCODINGS:
-            try:
-                raw_name = raw_name.decode(encoding)
-                break
-            except UnicodeDecodeError:
-                continue
-    
     return MANAGER_MAPPING.get(raw_name, raw_name)
 
 def get_month_name(month_number):
@@ -142,7 +124,7 @@ def extract_archive_info(filename):
     for rule in ARCHIVE_RULES:
         if not filename.startswith(rule["archive_pattern"]):
             continue
-        
+
         match = re.search(rule["archive_regex"], filename)
         if match:
             date_str = match.group(1)
@@ -152,16 +134,16 @@ def extract_archive_info(filename):
                 return date_obj, portfolio_code
             except ValueError:
                 continue
-    
+
     return None, None
 
 def extract_file_info(filename):
-    """Извлекает информацию из имени файла внутри архива"""
-    # Сначала пробуем декодировать имя
-    decoded_name = decode_zip_filename(filename)
-    
+    """
+    Извлекает информацию из имени файла внутри архива.
+    Ожидает уже декодированное имя БЕЗ пути (basename).
+    """
     for rule in FILE_RULES:
-        match = re.search(rule["file_pattern"], decoded_name)
+        match = re.search(rule["file_pattern"], filename)
         if match:
             if rule["identifier"] in ["trades", "brok_rpt"]:
                 broker_code = match.group(1)
@@ -171,34 +153,33 @@ def extract_file_info(filename):
                 portfolio_code = match.group(1)
                 date_str = match.group(2)
                 broker_code = None
-            
+
             try:
                 date_obj = datetime.strptime(date_str, rule["file_date_format"])
-                return date_obj, portfolio_code, broker_code, rule, decoded_name
+                return date_obj, portfolio_code, broker_code, rule
             except ValueError:
                 continue
-    
-    return None, None, None, None, decoded_name
 
-def build_destination_path(date_obj, rule, manager_name, portfolio_code, broker_code, original_filename):
+    return None, None, None, None
+
+def build_destination_path(date_obj, rule, manager_name, portfolio_code, broker_code, filename):
     """Строит путь назначения для файла"""
     year = str(date_obj.year)
     month_folder = format_month_folder(date_obj)
-    
+
     dest_path = rule["destination_template"]
-    
+
     portfolio_folder = portfolio_code if portfolio_code else broker_code
-    
+
     dest_path = dest_path.replace("*ГГГГ*", year)
     dest_path = dest_path.replace("*Месяц*", month_folder)
     dest_path = dest_path.replace("*Управляющий*", manager_name)
     dest_path = dest_path.replace("*Портфель*", portfolio_folder)
-    
+
     full_path = os.path.join(BASE_DEST_DIR, dest_path)
     Path(full_path).mkdir(parents=True, exist_ok=True)
-    
-    # Используем декодированное имя файла
-    return os.path.join(full_path, original_filename)
+
+    return os.path.join(full_path, filename)
 
 def normalize_filename(filename):
     """Нормализует имя файла для сравнения"""
@@ -211,122 +192,135 @@ def check_file_exists(dest_path):
     """Проверяет, существует ли файл"""
     dest_dir = os.path.dirname(dest_path)
     target_filename = os.path.basename(dest_path)
-    
+
     if not os.path.exists(dest_dir):
         return False
-    
+
     target_normalized = normalize_filename(target_filename)
-    
+
     try:
         existing_files = [f for f in os.listdir(dest_dir) if os.path.isfile(os.path.join(dest_dir, f))]
     except PermissionError:
         return False
-    
+
     for existing_file in existing_files:
         if normalize_filename(existing_file) == target_normalized:
             return True
-    
+
     return False
+
+def open_zip(zip_path):
+    """
+    Открывает zip-архив.
+    На Python 3.11+ использует metadata_encoding, на более старых версиях
+    имена перекодируются вручную через decode_zip_filename.
+    """
+    if sys.version_info >= (3, 11):
+        try:
+            return zipfile.ZipFile(zip_path, 'r', metadata_encoding=ZIP_METADATA_ENCODING), False
+        except ValueError:
+            # Архив с UTF-8 флагом — metadata_encoding не применим
+            pass
+    # need_decode=True: имена нужно перекодировать вручную
+    return zipfile.ZipFile(zip_path, 'r'), True
 
 def process_archive(zip_path, manager_name):
     """Обрабатывает один архив"""
     archive_name = os.path.basename(zip_path)
     print(f"\n📦 Обработка архива: {archive_name}")
-    
+
     archive_date, portfolio_code = extract_archive_info(archive_name)
     if not archive_date:
         print(f"   ⚠️ Не удалось определить дату/портфель из имени архива")
         return 0, 0
-    
+
     print(f"   📅 Дата архива: {archive_date.strftime('%d.%m.%Y')}")
     print(f"   📁 Портфель: {portfolio_code}")
-    
+
     processed = 0
     skipped = 0
-    
+
     try:
-        # Пробуем открыть архив с разными кодировками
-        zip_ref = None
-        for encoding in ZIP_ENCODINGS:
-            try:
-                if encoding == 'utf-8':
-                    zip_ref = zipfile.ZipFile(zip_path, 'r')
-                else:
-                    zip_ref = zipfile.ZipFile(zip_path, 'r', metadata_encoding=encoding)
-                break
-            except:
-                continue
-        
-        if zip_ref is None:
-            print(f"   ❌ Не удалось открыть архив")
-            return 0, 0
-        
+        zip_ref, need_decode = open_zip(zip_path)
+
         with zip_ref:
-            files_in_zip = zip_ref.namelist()
-            print(f"   📄 Найдено файлов в архиве: {len(files_in_zip)}")
-            
-            for encoded_name in files_in_zip:
+            infos = zip_ref.infolist()
+            files_count = sum(1 for i in infos if not i.is_dir())
+            print(f"   📄 Найдено файлов в архиве: {files_count}")
+
+            for info in infos:
+                # Пропускаем папки внутри архива
+                if info.is_dir():
+                    continue
+
                 # Декодируем имя файла
-                decoded_name = decode_zip_filename(encoded_name)
-                
+                if need_decode:
+                    decoded_name = decode_zip_filename(info.filename, info.flag_bits)
+                else:
+                    decoded_name = info.filename
+
+                # Работаем только с именем файла, без пути внутри архива
+                base_name = os.path.basename(decoded_name.replace('\\', '/'))
+
                 # Проверяем расширение
-                ext = os.path.splitext(decoded_name)[1].lower()
+                ext = os.path.splitext(base_name)[1].lower()
                 if ALLOWED_EXTENSIONS and ext not in ALLOWED_EXTENSIONS:
-                    print(f"      ⏭️ Пропускаем (неподдерживаемое расширение): {decoded_name}")
+                    print(f"      ⏭️ Пропускаем (неподдерживаемое расширение): {base_name}")
                     skipped += 1
                     continue
-                
+
                 # Извлекаем информацию из имени файла
-                file_date, file_portfolio, broker_code, rule, final_name = extract_file_info(encoded_name)
-                
+                file_date, file_portfolio, broker_code, rule = extract_file_info(base_name)
+
                 if not file_date:
-                    print(f"      ⚠️ Не удалось распознать файл: {decoded_name}")
+                    print(f"      ⚠️ Не удалось распознать файл: {base_name}")
                     skipped += 1
                     continue
-                
+
                 # Определяем код портфеля
                 final_portfolio = portfolio_code if portfolio_code else file_portfolio
-                
+
                 if not final_portfolio:
-                    print(f"      ⚠️ Не удалось определить портфель для: {decoded_name}")
+                    print(f"      ⚠️ Не удалось определить портфель для: {base_name}")
                     skipped += 1
                     continue
-                
+
                 if rule["identifier"] in ["trades", "brok_rpt"]:
                     final_portfolio = broker_code
-                
+
                 # Строим путь назначения
                 dest_path = build_destination_path(
-                    file_date, rule, manager_name, 
-                    final_portfolio, broker_code, final_name
+                    file_date, rule, manager_name,
+                    final_portfolio, broker_code, base_name
                 )
-                
+
                 if check_file_exists(dest_path):
-                    print(f"      ⏭️ Файл уже существует: {final_name}")
+                    print(f"      ⏭️ Файл уже существует: {base_name}")
                     skipped += 1
                     continue
-                
+
                 try:
-                    file_data = zip_ref.read(encoded_name)
+                    # Читаем по объекту info — надёжнее, чем по имени
+                    file_data = zip_ref.read(info)
                     os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-                    
+
                     with open(dest_path, 'wb') as f:
                         f.write(file_data)
-                    
-                    print(f"      ✅ {final_name}")
+
+                    print(f"      ✅ {base_name}")
                     print(f"         -> {dest_path}")
                     processed += 1
                 except Exception as e:
-                    print(f"      ❌ Ошибка при извлечении {final_name}: {e}")
+                    print(f"      ❌ Ошибка при извлечении {base_name}: {e}")
                     skipped += 1
-                    
+
     except zipfile.BadZipFile:
         print(f"   ❌ Файл не является zip-архивом: {zip_path}")
         return 0, 0
     except Exception as e:
         print(f"   ❌ Ошибка при открытии архива: {e}")
         return 0, 0
-    
+
     return processed, skipped
 
 def process_files():
@@ -336,34 +330,34 @@ def process_files():
     print(f"📂 Источник: {SOURCE_DIR}")
     print(f"📂 Назначение: {BASE_DEST_DIR}")
     print("=" * 70)
-    
+
     if not os.path.exists(SOURCE_DIR):
         print(f"❌ Папка-источник не найдена: {SOURCE_DIR}")
         return
-    
+
     manager_name = get_manager_name(SOURCE_DIR)
     print(f"👤 Управляющий: {manager_name}")
     print("=" * 70)
-    
+
     files = [f for f in os.listdir(SOURCE_DIR) if os.path.isfile(os.path.join(SOURCE_DIR, f))]
     archives = [f for f in files if f.lower().endswith(('.zip', '.rar'))]
-    
+
     if not archives:
         print("ℹ️ В папке-источнике нет архивов")
         return
-    
+
     print(f"📄 Найдено архивов: {len(archives)}")
     print("=" * 70)
-    
+
     total_processed = 0
     total_skipped = 0
-    
+
     for archive_name in archives:
         archive_path = os.path.join(SOURCE_DIR, archive_name)
         processed, skipped = process_archive(archive_path, manager_name)
         total_processed += processed
         total_skipped += skipped
-    
+
     print("\n" + "=" * 70)
     print("📊 ИТОГ:")
     print(f"   ✅ Извлечено файлов: {total_processed}")
