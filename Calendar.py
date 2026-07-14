@@ -3,7 +3,6 @@ import pandas as pd
 import calendar
 from datetime import datetime, date
 import os
-import random
 
 # ============================================================
 # НАСТРАИВАЕМЫЕ ПАРАМЕТРЫ
@@ -52,17 +51,14 @@ def load_portfolio(file_path):
     except Exception as e:
         return pd.DataFrame(), str(e)
 
-# --- Функция для генерации цветов портфелей ---
-def get_portfolio_color(portfolio_name):
+def get_portfolio_color(portfolio_name, idx):
+    """Генерирует цвет для портфеля на основе индекса"""
     colors = [
         '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7',
         '#DDA0DD', '#FF8A5C', '#A8D8EA', '#FFD93D', '#6BCB77',
-        '#FF9FF3', '#54A0FF', '#5F27CD', '#FF9F43', '#00D2D3',
-        '#F368E0', '#FFC048', '#74B9FF', '#55EFC4', '#FD79A8'
+        '#FF9FF3', '#54A0FF', '#5F27CD', '#FF9F43', '#00D2D3'
     ]
-    # Используем хеш для стабильного цвета
-    hash_val = hash(portfolio_name) % len(colors)
-    return colors[hash_val]
+    return colors[idx % len(colors)]
 
 # --- Загружаем файлы ---
 calendar_df, cal_err = load_calendar(CALENDAR_FILE_PATH)
@@ -77,19 +73,9 @@ if port_err:
 
 st.title("📅 Coupon Payment Calendar")
 
-# Выбор месяца
-col1, col2, col3 = st.columns([1, 2, 1])
-with col2:
-    year = st.selectbox("Year", [2026, 2027, 2028], index=0, label_visibility="collapsed")
-    month = st.selectbox("Month", range(1, 13), 
-                        format_func=lambda x: calendar.month_name[x],
-                        index=datetime.now().month - 1,
-                        label_visibility="collapsed")
-
-st.markdown(f"## {calendar.month_name[month]} {year}")
-
-# Создаем lookup для портфеля по ISIN
+# --- Создаем lookup для портфеля по ISIN ---
 portfolio_lookup = {}
+all_portfolios = set()
 if not portfolio_df.empty:
     for _, row in portfolio_df.iterrows():
         isin = row['ISIN'].strip()
@@ -98,6 +84,36 @@ if not portfolio_df.empty:
             'PORTFOLIO': row.get('PORTFOLIO', ''),
             'MANAGEMENT_COMPANY': row.get('MANAGEMENT_COMPANY', '')
         }
+        if row.get('PORTFOLIO'):
+            all_portfolios.add(row.get('PORTFOLIO'))
+
+# --- Боковая панель с фильтрами ---
+with st.sidebar:
+    st.header("🎯 Filters")
+    
+    # Выбор портфелей
+    portfolio_options = sorted(list(all_portfolios))
+    if portfolio_options:
+        selected_portfolios = st.multiselect(
+            "Select Portfolios",
+            options=portfolio_options,
+            default=portfolio_options,
+            help="Choose one or multiple portfolios"
+        )
+    else:
+        selected_portfolios = []
+        st.warning("No portfolios found")
+    
+    st.divider()
+    
+    # Выбор месяца
+    year = st.selectbox("Year", [2026, 2027, 2028], index=0)
+    month = st.selectbox("Month", range(1, 13), 
+                        format_func=lambda x: calendar.month_name[x],
+                        index=datetime.now().month - 1)
+
+# --- Основной контент ---
+st.markdown(f"## {calendar.month_name[month]} {year}")
 
 # Фильтруем события за месяц
 first_day = date(year, month, 1)
@@ -107,34 +123,33 @@ month_events = calendar_df[
     (calendar_df['DATE'].dt.date <= last_day)
 ]
 
-# Группируем события по дням
+# Группируем события по дням с учетом выбранных портфелей
 events_by_day = {}
+all_events_by_day = {}  # Все события для отображения в календаре
+
 for _, event in month_events.iterrows():
     day = event['DATE'].day
+    isin = event['ISIN'].strip()
+    
+    # Получаем данные из портфеля
+    portfolio_info = portfolio_lookup.get(isin, {})
+    portfolio = portfolio_info.get('PORTFOLIO', '')
+    
+    # Если портфель не выбран - пропускаем
+    if selected_portfolios and portfolio not in selected_portfolios:
+        continue
+    
     if day not in events_by_day:
         events_by_day[day] = []
     
-    isin = event['ISIN'].strip()
-    event_info = {
+    events_by_day[day].append({
         'ISIN': isin,
         'NAME': event.get('NAME', ''),
+        'ASSET': portfolio_info.get('ASSET', ''),
+        'PORTFOLIO': portfolio,
         'PAYMENT': event.get('PAYMENT_RUB', 0),
-    }
-    
-    # Ищем в портфеле
-    if isin in portfolio_lookup:
-        event_info['ASSET'] = portfolio_lookup[isin]['ASSET']
-        event_info['PORTFOLIO'] = portfolio_lookup[isin]['PORTFOLIO']
-        event_info['MANAGEMENT_COMPANY'] = portfolio_lookup[isin]['MANAGEMENT_COMPANY']
-        event_info['FOUND'] = True
-    else:
-        # Если не нашли ISIN - помечаем как неизвестный
-        event_info['ASSET'] = 'Not found'
-        event_info['PORTFOLIO'] = 'Unknown'
-        event_info['MANAGEMENT_COMPANY'] = 'Unknown'
-        event_info['FOUND'] = False
-    
-    events_by_day[day].append(event_info)
+        'MANAGEMENT_COMPANY': portfolio_info.get('MANAGEMENT_COMPANY', '')
+    })
 
 # --- ОТОБРАЖЕНИЕ КАЛЕНДАРЯ ---
 cal = calendar.monthcalendar(year, month)
@@ -153,151 +168,110 @@ for week in cal:
                 st.empty()
             else:
                 if day in events_by_day:
-                    # Собираем все портфели для этого дня
+                    # Собираем портфели для этого дня
                     portfolios = set()
                     for e in events_by_day[day]:
-                        if e.get('PORTFOLIO') and e['PORTFOLIO'] != 'Unknown':
+                        if e.get('PORTFOLIO'):
                             portfolios.add(e['PORTFOLIO'])
                     
-                    # Если есть портфели - показываем цветные полоски
+                    # Кнопка дня с количеством
+                    if st.button(
+                        f"{day}\n{len(events_by_day[day])}",
+                        key=f"day_{year}_{month}_{day}",
+                        use_container_width=True,
+                        type="secondary"
+                    ):
+                        st.session_state.selected_day = day
+                        st.session_state.selected_events = events_by_day[day]
+                    
+                    # Цветные полоски портфелей
                     if portfolios:
-                        # Создаем контейнер для полосок
-                        color_bars = []
-                        for p in portfolios:
-                            color = get_portfolio_color(p)
-                            color_bars.append(
-                                f'<div style="background-color: {color}; height: 4px; border-radius: 2px; margin: 1px 0;"></div>'
-                            )
-                        
-                        # Кнопка дня
-                        if st.button(
-                            str(day),
-                            key=f"day_{year}_{month}_{day}",
-                            use_container_width=True,
-                            type="secondary"
-                        ):
-                            st.session_state.selected_day = day
-                            st.session_state.selected_events = events_by_day[day]
-                        
-                        # Показываем полоски портфелей
-                        st.markdown(
-                            f'<div style="margin-top: 2px;">{"".join(color_bars)}</div>',
-                            unsafe_allow_html=True
-                        )
-                        
-                        # Показываем количество купонов
-                        st.caption(f"{len(events_by_day[day])} 📌")
-                        
-                        # Показываем названия портфелей (кратко)
-                        if len(portfolios) <= 3:
-                            st.caption(", ".join(list(portfolios)))
-                        else:
-                            st.caption(f"{len(portfolios)} portfolios")
+                        bars = ""
+                        for idx, p in enumerate(portfolios):
+                            color = get_portfolio_color(p, idx)
+                            bars += f'<div style="background-color: {color}; height: 3px; border-radius: 2px; margin: 1px 0;"></div>'
+                        st.markdown(bars, unsafe_allow_html=True)
                     else:
-                        # Если портфелей нет - показываем серую полоску
-                        if st.button(
-                            str(day),
-                            key=f"day_{year}_{month}_{day}",
-                            use_container_width=True,
-                            type="secondary"
-                        ):
-                            st.session_state.selected_day = day
-                            st.session_state.selected_events = events_by_day[day]
-                        
                         st.markdown(
-                            f'<div style="background-color: #D3D3D3; height: 3px; border-radius: 2px; margin-top: 2px;"></div>',
+                            '<div style="background-color: #D3D3D3; height: 3px; border-radius: 2px; margin: 1px 0;"></div>',
                             unsafe_allow_html=True
                         )
-                        st.caption(f"{len(events_by_day[day])} 📌")
                 else:
                     st.write(f"**{day}**")
 
 # --- ДЕТАЛИ ПО ВЫБРАННОМУ ДНЮ ---
 if hasattr(st.session_state, 'selected_day') and st.session_state.selected_day:
-    st.divider()
-    st.markdown(f"### 📋 {st.session_state.selected_day} {calendar.month_name[month]} {year}")
-    
-    if st.session_state.selected_events:
-        # Подготовка данных для таблицы
-        data = []
-        for event in st.session_state.selected_events:
-            # Проверяем, что ASSET не пустой и не N/A
-            asset = event.get('ASSET', '')
-            if not asset or asset == 'Not found':
-                asset = '⚠️ Not in portfolio'
+    selected = st.session_state.selected_day
+    if selected in events_by_day:
+        st.divider()
+        st.markdown(f"### 📋 Coupons for {selected} {calendar.month_name[month]} {year}")
+        
+        if events_by_day[selected]:
+            # Подготовка данных для таблицы - ТОЛЬКО активы с купонами
+            data = []
+            for event in events_by_day[selected]:
+                data.append({
+                    'Asset': event.get('ASSET', ''),
+                    'Portfolio': event.get('PORTFOLIO', ''),
+                    'Payment (RUB)': event.get('PAYMENT', 0),
+                    'ISIN': event.get('ISIN', '')
+                })
             
-            portfolio = event.get('PORTFOLIO', '')
-            if not portfolio or portfolio == 'Unknown':
-                portfolio = '⚠️ Not found'
+            df = pd.DataFrame(data)
             
-            data.append({
-                'Asset': asset,
-                'Portfolio': portfolio,
-                'Payment (RUB)': event.get('PAYMENT', 0) if event.get('PAYMENT', 0) > 0 else '-',
-                'ISIN': event.get('ISIN', '')
-            })
-        
-        df = pd.DataFrame(data)
-        
-        # Стилизация таблицы
-        st.dataframe(
-            df,
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                'Payment (RUB)': st.column_config.NumberColumn(format="%.2f ₽"),
-                'ISIN': st.column_config.TextColumn(width='small'),
-            }
-        )
-        
-        # Сводка по портфелям
-        portfolios_count = {}
-        for event in st.session_state.selected_events:
-            p = event.get('PORTFOLIO', 'Unknown')
-            if p and p != 'Unknown':
-                portfolios_count[p] = portfolios_count.get(p, 0) + 1
-        
-        if portfolios_count:
-            st.caption("📊 Breakdown by Portfolio:")
-            for p, count in portfolios_count.items():
-                color = get_portfolio_color(p)
-                st.markdown(
-                    f'<div style="display: flex; align-items: center; gap: 8px; margin: 2px 0;">'
-                    f'<div style="background-color: {color}; width: 12px; height: 12px; border-radius: 3px;"></div>'
-                    f'<span>{p}: {count} coupon(s)</span>'
-                    f'</div>',
-                    unsafe_allow_html=True
-                )
-        
-        # Предупреждение о ненайденных ISIN
-        not_found = [e for e in st.session_state.selected_events if e.get('ASSET') == 'Not found']
-        if not_found:
-            st.warning(f"⚠️ {len(not_found)} ISIN(s) not found in portfolio")
+            # Показываем таблицу
+            st.dataframe(
+                df,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    'Payment (RUB)': st.column_config.NumberColumn(
+                        format="%.2f ₽",
+                        help="Coupon payment amount"
+                    ),
+                    'ISIN': st.column_config.TextColumn(
+                        width='small',
+                        help="ISIN code"
+                    )
+                }
+            )
+            
+            # Статистика по портфелям
+            st.caption(f"Total coupons: {len(events_by_day[selected])}")
+            
+            # Breakdown по портфелям
+            portfolio_counts = {}
+            for event in events_by_day[selected]:
+                p = event.get('PORTFOLIO', '')
+                if p:
+                    portfolio_counts[p] = portfolio_counts.get(p, 0) + 1
+            
+            if portfolio_counts:
+                st.caption("Breakdown by Portfolio:")
+                for p, count in portfolio_counts.items():
+                    st.caption(f"• {p}: {count} coupon(s)")
+    else:
+        st.info("No coupons on this day")
 
-# --- Легенда портфелей (все уникальные портфели за месяц) ---
-st.divider()
-st.markdown("### 🎨 Portfolio Legend")
-
-# Собираем все портфели за месяц
-all_portfolios = set()
+# --- Легенда портфелей ---
+# Собираем все портфели, которые есть в отфильтрованных данных
+shown_portfolios = set()
 for day_events in events_by_day.values():
     for e in day_events:
-        p = e.get('PORTFOLIO')
-        if p and p != 'Unknown':
-            all_portfolios.add(p)
+        if e.get('PORTFOLIO'):
+            shown_portfolios.add(e['PORTFOLIO'])
 
-if all_portfolios:
-    # Показываем в несколько колонок
-    cols = st.columns(min(len(all_portfolios), 5))
-    for i, p in enumerate(sorted(all_portfolios)):
-        with cols[i % len(cols)]:
-            color = get_portfolio_color(p)
+if shown_portfolios:
+    st.divider()
+    st.markdown("### 🎨 Legend")
+    cols = st.columns(min(len(shown_portfolios), 5))
+    for idx, p in enumerate(sorted(shown_portfolios)):
+        with cols[idx % len(cols)]:
+            color = get_portfolio_color(p, idx)
             st.markdown(
-                f'<div style="display: flex; align-items: center; gap: 8px; margin: 2px 0;">'
+                f'<div style="display: flex; align-items: center; gap: 8px;">'
                 f'<div style="background-color: {color}; width: 16px; height: 16px; border-radius: 4px;"></div>'
                 f'<span style="font-size: 13px;">{p}</span>'
                 f'</div>',
                 unsafe_allow_html=True
             )
-else:
-    st.info("No portfolio data found for this month")
