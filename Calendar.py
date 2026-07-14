@@ -11,7 +11,7 @@ DATA_FILE_PATH = r"M:\Финансовый департамент\Treasury\3. З
 # ============================================================
 
 st.set_page_config(
-    page_title="📅 Coupon Calendar",
+    page_title="📅 Календарь купонов",
     page_icon="📅",
     layout="wide"
 )
@@ -22,7 +22,7 @@ def load_data(file_path):
     """Загружает данные из файла Coupon_events.xlsx"""
     try:
         if not os.path.exists(file_path):
-            st.error(f"File not found: {file_path}")
+            st.error(f"Файл не найден: {file_path}")
             return pd.DataFrame()
         
         df = pd.read_excel(file_path)
@@ -36,7 +36,7 @@ def load_data(file_path):
         
         return df
     except Exception as e:
-        st.error(f"Error loading data: {e}")
+        st.error(f"Ошибка загрузки данных: {e}")
         return pd.DataFrame()
 
 # --- Функция для цветов портфелей ---
@@ -53,24 +53,24 @@ def get_portfolio_color(portfolio_name, idx):
 df = load_data(DATA_FILE_PATH)
 
 if df.empty:
-    st.error("No data loaded. Please check the file path.")
+    st.error("Нет данных. Проверьте путь к файлу.")
     st.stop()
 
-st.title("📅 Coupon Payment Calendar")
+st.title("📅 Календарь купонов")
 
 # --- Боковая панель с фильтрами ---
 with st.sidebar:
-    st.header("🎯 Filters")
+    st.header("🎯 Фильтры")
     
     # Получаем список всех портфелей
     all_portfolios = sorted(df['PORTFOLIO'].unique().tolist())
     
     # Выбор портфелей
     selected_portfolios = st.multiselect(
-        "Select Portfolios",
+        "Выберите портфели",
         options=all_portfolios,
         default=all_portfolios,
-        help="Choose one or multiple portfolios"
+        help="Выберите один или несколько портфелей"
     )
     
     st.divider()
@@ -78,10 +78,10 @@ with st.sidebar:
     # Выбор УК
     all_uk = sorted(df['MANAGEMENT_COMPANY'].unique().tolist())
     selected_uk = st.multiselect(
-        "Select Management Companies",
+        "Выберите управляющие компании",
         options=all_uk,
         default=all_uk,
-        help="Choose one or multiple management companies"
+        help="Выберите одну или несколько УК"
     )
     
     st.divider()
@@ -94,37 +94,35 @@ with st.sidebar:
     # Доступные года (от 2020 до текущего)
     available_years = list(range(2020, current_year + 1))
     year = st.selectbox(
-        "Year", 
+        "Год", 
         available_years, 
-        index=len(available_years) - 1  # По умолчанию текущий год
+        index=len(available_years) - 1
     )
     
     # Доступные месяцы
     if year == current_year:
-        # Если выбран текущий год - только до текущего месяца
         available_months = list(range(1, current_month + 1))
     else:
-        # Если выбран прошлый год - все 12 месяцев
         available_months = list(range(1, 13))
     
     month = st.selectbox(
-        "Month", 
+        "Месяц", 
         available_months,
         format_func=lambda x: calendar.month_name[x],
-        index=len(available_months) - 1  # По умолчанию последний доступный месяц
+        index=len(available_months) - 1
     )
     
     st.divider()
     
     # Статистика
-    st.markdown("### 📊 Statistics")
+    st.markdown("### 📊 Статистика")
     filtered_df = df[
         (df['PORTFOLIO'].isin(selected_portfolios)) &
         (df['MANAGEMENT_COMPANY'].isin(selected_uk))
     ]
-    st.metric("Total Coupons", len(filtered_df))
-    st.metric("Unique ISINs", filtered_df['ISIN'].nunique())
-    st.metric("Unique Portfolios", filtered_df['PORTFOLIO'].nunique())
+    st.metric("Всего купонов", len(filtered_df))
+    st.metric("Уникальных ISIN", filtered_df['ISIN'].nunique())
+    st.metric("Уникальных портфелей", filtered_df['PORTFOLIO'].nunique())
 
 # --- Основной контент ---
 st.markdown(f"## {calendar.month_name[month]} {year}")
@@ -155,7 +153,6 @@ for _, event in month_df.iterrows():
         'ASSET': event['ASSET'],
         'PORTFOLIO': event['PORTFOLIO'],
         'MANAGEMENT_COMPANY': event['MANAGEMENT_COMPANY'],
-        'PAYMENT_RUB': event['PAYMENT_RUB'],
         'NAME': event.get('NAME', '')
     })
 
@@ -164,7 +161,7 @@ cal = calendar.monthcalendar(year, month)
 
 # Шапка
 cols = st.columns(7)
-for i, day_name in enumerate(['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']):
+for i, day_name in enumerate(['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']):
     cols[i].markdown(f"**{day_name}**")
 
 # Ячейки календаря
@@ -206,18 +203,18 @@ if hasattr(st.session_state, 'selected_day') and st.session_state.selected_day:
     selected = st.session_state.selected_day
     if selected in events_by_day:
         st.divider()
-        st.markdown(f"### 📋 Coupons for {selected} {calendar.month_name[month]} {year}")
+        st.markdown(f"### 📋 Купоны на {selected} {calendar.month_name[month]} {year}")
         
         if events_by_day[selected]:
             # Подготовка данных для таблицы
             data = []
             for event in events_by_day[selected]:
                 data.append({
-                    'ASSET': event['ASSET'],
-                    'PORTFOLIO': event['PORTFOLIO'],
-                    'MANAGEMENT_COMPANY': event['MANAGEMENT_COMPANY'],
-                    'Payment (RUB)': event['PAYMENT_RUB'],
-                    'ISIN': event['ISIN']
+                    'Актив': event['ASSET'],
+                    'Портфель': event['PORTFOLIO'],
+                    'Управляющая компания': event['MANAGEMENT_COMPANY'],
+                    'ISIN': event['ISIN'],
+                    'Название': event['NAME']
                 })
             
             df_day = pd.DataFrame(data)
@@ -228,32 +225,32 @@ if hasattr(st.session_state, 'selected_day') and st.session_state.selected_day:
                 use_container_width=True,
                 hide_index=True,
                 column_config={
-                    'Payment (RUB)': st.column_config.NumberColumn(
-                        format="%.2f ₽"
-                    ),
                     'ISIN': st.column_config.TextColumn(
                         width='small'
+                    ),
+                    'Название': st.column_config.TextColumn(
+                        width='medium'
                     )
                 }
             )
             
             # Статистика по портфелям
-            st.caption(f"Total coupons: {len(events_by_day[selected])}")
+            st.caption(f"Всего купонов в этот день: {len(events_by_day[selected])}")
             
-            # Breakdown по портфелям
+            # Разбивка по портфелям
             portfolio_counts = {}
             for event in events_by_day[selected]:
                 p = event['PORTFOLIO']
                 portfolio_counts[p] = portfolio_counts.get(p, 0) + 1
             
             if portfolio_counts:
-                st.caption("Breakdown by Portfolio:")
+                st.caption("Разбивка по портфелям:")
                 for p, count in portfolio_counts.items():
                     color = get_portfolio_color(p, list(portfolio_counts.keys()).index(p))
                     st.markdown(
                         f'<div style="display: flex; align-items: center; gap: 8px; margin: 2px 0;">'
                         f'<div style="background-color: {color}; width: 12px; height: 12px; border-radius: 3px;"></div>'
-                        f'<span>{p}: {count} coupon(s)</span>'
+                        f'<span>{p}: {count} купон(ов)</span>'
                         f'</div>',
                         unsafe_allow_html=True
                     )
@@ -267,7 +264,7 @@ for day_events in events_by_day.values():
 
 if shown_portfolios:
     st.divider()
-    st.markdown("### 🎨 Legend")
+    st.markdown("### 🎨 Легенда")
     cols = st.columns(min(len(shown_portfolios), 5))
     for idx, p in enumerate(sorted(shown_portfolios)):
         with cols[idx % len(cols)]:
@@ -282,4 +279,4 @@ if shown_portfolios:
 
 # --- Информация о данных ---
 st.divider()
-st.caption(f"📊 Data source: {os.path.basename(DATA_FILE_PATH)} | Total records: {len(df)}")
+st.caption(f"📊 Источник данных: {os.path.basename(DATA_FILE_PATH)} | Всего записей: {len(df)}")
