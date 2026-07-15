@@ -6,12 +6,13 @@ from tkinter import ttk, scrolledtext, messagebox, filedialog
 import pythoncom
 from datetime import datetime
 import sys
+import json
 
 class EmailBatchSender:
     def __init__(self, root):
         self.root = root
         self.root.title("Массовая отправка писем с шаблоном")
-        self.root.geometry("1000x700")
+        self.root.geometry("1200x700")
         
         # Инициализация Outlook
         try:
@@ -26,8 +27,10 @@ class EmailBatchSender:
         self.draft_path = ""
         self.template_body = ""
         self.template_subject = ""
-        self.placeholders = []
+        self.template_parts = []  # Разбитый шаблон на части
+        self.placeholders = []  # Список плейсхолдеров в порядке появления
         self.email_items = []  # Список словарей с данными для каждого письма
+        self.current_selection = None  # Текущий выбранный индекс
         
         # Создаем интерфейс
         self.create_widgets()
@@ -46,6 +49,8 @@ class EmailBatchSender:
         ttk.Button(toolbar, text="Удалить выделенного", command=self.delete_recipient).pack(side=tk.LEFT, padx=5)
         ttk.Button(toolbar, text="Отправить все", command=self.send_all).pack(side=tk.LEFT, padx=5)
         ttk.Button(toolbar, text="Открыть выбранное", command=self.open_selected).pack(side=tk.LEFT, padx=5)
+        ttk.Button(toolbar, text="Экспорт", command=self.export_data).pack(side=tk.LEFT, padx=5)
+        ttk.Button(toolbar, text="Импорт", command=self.import_data).pack(side=tk.LEFT, padx=5)
         
         # Информация о шаблоне
         self.template_info = ttk.Label(main_frame, text="Шаблон не загружен", foreground="red")
@@ -91,40 +96,98 @@ class EmailBatchSender:
         right_frame = ttk.Frame(paned)
         paned.add(right_frame, weight=2)
         
-        ttk.Label(right_frame, text="Редактирование текста письма:", font=('Arial', 10, 'bold')).pack(anchor=tk.W, pady=(0, 5))
+        ttk.Label(right_frame, text="Редактирование значений плейсхолдеров:", font=('Arial', 10, 'bold')).pack(anchor=tk.W, pady=(0, 5))
         
         # Информация о плейсхолдерах
-        self.placeholder_info = ttk.Label(right_frame, text="Плейсхолдеры: {}")
+        self.placeholder_info = ttk.Label(right_frame, text="Плейсхолдеры не найдены")
         self.placeholder_info.pack(anchor=tk.W, pady=(0, 5))
         
-        # Текстовое поле для редактирования
-        self.text_editor = scrolledtext.ScrolledText(right_frame, wrap=tk.WORD, height=20)
-        self.text_editor.pack(fill=tk.BOTH, expand=True, pady=(0, 5))
+        # Создаем фрейм для редактирования плейсхолдеров
+        placeholder_edit_frame = ttk.Frame(right_frame)
+        placeholder_edit_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 5))
         
-        # Кнопки для вставки плейсхолдеров
-        placeholder_frame = ttk.Frame(right_frame)
-        placeholder_frame.pack(fill=tk.X, pady=5)
+        # Canvas для прокрутки полей ввода
+        canvas = tk.Canvas(placeholder_edit_frame)
+        scrollbar = ttk.Scrollbar(placeholder_edit_frame, orient="vertical", command=canvas.yview)
+        self.scrollable_frame = ttk.Frame(canvas)
         
-        ttk.Label(placeholder_frame, text="Вставить плейсхолдер:").pack(side=tk.LEFT, padx=5)
+        self.scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
         
-        self.placeholder_var = tk.StringVar()
-        self.placeholder_combo = ttk.Combobox(placeholder_frame, textvariable=self.placeholder_var, width=20)
-        self.placeholder_combo.pack(side=tk.LEFT, padx=5)
+        canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
         
-        ttk.Button(placeholder_frame, text="Вставить", command=self.insert_placeholder).pack(side=tk.LEFT, padx=5)
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
         
-        # Кнопки управления текстом
+        # Контейнер для полей ввода плейсхолдеров
+        self.placeholder_widgets = {}
+        
+        # Кнопки управления
         text_buttons_frame = ttk.Frame(right_frame)
         text_buttons_frame.pack(fill=tk.X, pady=5)
         
-        ttk.Button(text_buttons_frame, text="Применить ко всем", command=self.apply_to_all).pack(side=tk.LEFT, padx=5)
-        ttk.Button(text_buttons_frame, text="Сбросить текст", command=self.reset_text).pack(side=tk.LEFT, padx=5)
         ttk.Button(text_buttons_frame, text="Предпросмотр", command=self.preview_email).pack(side=tk.LEFT, padx=5)
+        ttk.Button(text_buttons_frame, text="Очистить все поля", command=self.clear_all_fields).pack(side=tk.LEFT, padx=5)
+        ttk.Button(text_buttons_frame, text="Заполнить тестовыми данными", command=self.fill_test_data).pack(side=tk.LEFT, padx=5)
         
         # Статус бар
         self.status_bar = ttk.Label(self.root, text="Готов к работе", relief=tk.SUNKEN, anchor=tk.W)
         self.status_bar.pack(side=tk.BOTTOM, fill=tk.X)
         
+    def parse_template(self, body):
+        """Разбор шаблона на части и извлечение плейсхолдеров"""
+        # Находим все плейсхолдеры с их позициями
+        pattern = r'\{([^}]+)\}'
+        matches = list(re.finditer(pattern, body))
+        
+        if not matches:
+            return [body], []
+        
+        # Разбиваем текст на части
+        parts = []
+        placeholders = []
+        last_end = 0
+        
+        for match in matches:
+            # Добавляем текст до плейсхолдера
+            if match.start() > last_end:
+                parts.append(body[last_end:match.start()])
+            
+            # Добавляем плейсхолдер как отдельную часть
+            placeholder_name = match.group(1)
+            parts.append(f"{{{placeholder_name}}}")
+            placeholders.append(placeholder_name)
+            
+            last_end = match.end()
+        
+        # Добавляем остаток текста
+        if last_end < len(body):
+            parts.append(body[last_end:])
+        
+        return parts, placeholders
+    
+    def build_email_body(self, parts, values):
+        """Сборка тела письма из частей и значений"""
+        result = []
+        value_index = 0
+        
+        for part in parts:
+            if part.startswith('{') and part.endswith('}') and not part.startswith('{{'):
+                # Это плейсхолдер
+                if value_index < len(values):
+                    result.append(values[value_index])
+                    value_index += 1
+                else:
+                    result.append(part)
+            else:
+                # Обычный текст
+                result.append(part)
+        
+        return ''.join(result)
+    
     def load_template(self):
         """Загрузка шаблона письма"""
         file_path = filedialog.askopenfilename(
@@ -144,9 +207,8 @@ class EmailBatchSender:
             self.template_body = mail.Body
             self.template_subject = mail.Subject
             
-            # Находим все плейсхолдеры в формате {text}
-            self.placeholders = re.findall(r'\{([^}]+)\}', self.template_body)
-            self.placeholders = list(set(self.placeholders))  # Убираем дубликаты
+            # Разбираем шаблон на части
+            self.template_parts, self.placeholders = self.parse_template(self.template_body)
             
             # Обновляем информацию
             self.template_info.config(
@@ -154,16 +216,37 @@ class EmailBatchSender:
                 foreground="green"
             )
             
-            # Обновляем комбобокс с плейсхолдерами
-            self.placeholder_combo['values'] = [f"{{{p}}}" for p in self.placeholders]
-            
-            # Если есть плейсхолдеры, показываем информацию
+            # Обновляем информацию о плейсхолдерах
             if self.placeholders:
-                self.placeholder_info.config(text=f"Плейсхолдеры: {', '.join([f'{{{p}}}' for p in self.placeholders])}")
+                self.placeholder_info.config(
+                    text=f"Плейсхолдеры ({len(self.placeholders)}): " + ", ".join(self.placeholders)
+                )
+            else:
+                self.placeholder_info.config(text="Плейсхолдеры не найдены")
             
             # Очищаем список получателей
             self.email_items = []
             self.update_tree()
+            
+            # Очищаем поля ввода
+            for widget in self.placeholder_widgets.values():
+                widget.destroy()
+            self.placeholder_widgets.clear()
+            
+            # Создаем поля для ввода значений плейсхолдеров
+            if self.placeholders:
+                for i, placeholder in enumerate(self.placeholders):
+                    frame = ttk.Frame(self.scrollable_frame)
+                    frame.pack(fill=tk.X, pady=2)
+                    
+                    label = ttk.Label(frame, text=f"{{{placeholder}}}:", width=20, anchor=tk.W)
+                    label.pack(side=tk.LEFT, padx=5)
+                    
+                    entry = ttk.Entry(frame, width=50)
+                    entry.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+                    
+                    # Сохраняем ссылку на поле ввода
+                    self.placeholder_widgets[placeholder] = entry
             
             # Автоматически добавляем первого получателя
             self.add_recipient()
@@ -180,7 +263,7 @@ class EmailBatchSender:
         # Создаем диалог для ввода данных
         dialog = tk.Toplevel(self.root)
         dialog.title("Добавить получателя")
-        dialog.geometry("400x200")
+        dialog.geometry("400x250")
         dialog.transient(self.root)
         dialog.grab_set()
         
@@ -205,27 +288,33 @@ class EmailBatchSender:
             cc = cc_entry.get().strip()
             subject = subject_entry.get().strip() or self.template_subject
             
+            # Создаем словарь для значений плейсхолдеров
+            placeholder_values = {}
+            for placeholder in self.placeholders:
+                placeholder_values[placeholder] = ""
+            
             # Создаем данные для письма
             email_data = {
                 'to': to,
                 'cc': cc,
                 'subject': subject,
-                'body': self.template_body  # Начинаем с шаблона
+                'placeholder_values': placeholder_values
             }
             
             self.email_items.append(email_data)
             self.update_tree()
             
-            # Если это первый получатель, автоматически выбираем его
-            if len(self.email_items) == 1:
-                self.tree.selection_set(self.tree.get_children()[0])
+            # Выбираем нового получателя
+            children = self.tree.get_children()
+            if children:
+                self.tree.selection_set(children[-1])
                 self.on_recipient_select(None)
             
             dialog.destroy()
             self.status_bar.config(text=f"Добавлен получатель: {to}")
         
         ttk.Button(dialog, text="Добавить", command=save_recipient).pack(pady=10)
-        
+    
     def delete_recipient(self):
         """Удаление выбранного получателя"""
         selection = self.tree.selection()
@@ -234,17 +323,16 @@ class EmailBatchSender:
             return
         
         if messagebox.askyesno("Подтверждение", "Удалить выбранного получателя?"):
-            # Получаем индекс
             item = selection[0]
             index = self.tree.index(item)
             
-            # Удаляем из списка
             del self.email_items[index]
             self.update_tree()
             self.status_bar.config(text="Получатель удален")
             
-            # Очищаем редактор
-            self.text_editor.delete('1.0', tk.END)
+            # Очищаем поля ввода
+            for entry in self.placeholder_widgets.values():
+                entry.delete(0, tk.END)
     
     def on_recipient_select(self, event):
         """Обработчик выбора получателя в списке"""
@@ -256,69 +344,48 @@ class EmailBatchSender:
         index = self.tree.index(item)
         
         if index < len(self.email_items):
+            self.current_selection = index
             email_data = self.email_items[index]
-            # Загружаем текст в редактор
-            self.text_editor.delete('1.0', tk.END)
-            self.text_editor.insert('1.0', email_data.get('body', ''))
+            
+            # Загружаем значения плейсхолдеров
+            values = email_data.get('placeholder_values', {})
+            for placeholder, entry in self.placeholder_widgets.items():
+                entry.delete(0, tk.END)
+                if placeholder in values:
+                    entry.insert(0, values[placeholder])
             
             # Обновляем статус
             self.status_bar.config(text=f"Редактирование письма для: {email_data['to']}")
     
-    def insert_placeholder(self):
-        """Вставка плейсхолдера в текст"""
-        placeholder = self.placeholder_var.get()
-        if not placeholder:
-            messagebox.showwarning("Предупреждение", "Выберите плейсхолдер")
-            return
-        
-        # Вставляем в текущую позицию курсора
-        self.text_editor.insert(tk.INSERT, placeholder)
+    def get_current_values(self):
+        """Получение текущих значений из полей ввода"""
+        values = {}
+        for placeholder, entry in self.placeholder_widgets.items():
+            values[placeholder] = entry.get().strip()
+        return values
     
-    def apply_to_all(self):
-        """Применить текущий текст ко всем получателям"""
-        if not self.email_items:
-            messagebox.showwarning("Предупреждение", "Нет получателей")
+    def save_current_values(self):
+        """Сохранение текущих значений для выбранного получателя"""
+        if self.current_selection is None:
             return
         
-        current_text = self.text_editor.get('1.0', tk.END).strip()
-        if not current_text:
-            messagebox.showwarning("Предупреждение", "Текст письма пуст")
-            return
-        
-        if messagebox.askyesno("Подтверждение", "Применить текущий текст ко всем получателям?"):
-            for email_data in self.email_items:
-                email_data['body'] = current_text
-            
-            self.update_tree()
-            self.status_bar.config(text="Текст применен ко всем получателям")
-            messagebox.showinfo("Успех", f"Текст применен к {len(self.email_items)} получателям")
-    
-    def reset_text(self):
-        """Сброс текста к шаблону"""
-        if not self.template_body:
-            messagebox.showwarning("Предупреждение", "Шаблон не загружен")
-            return
-        
-        if messagebox.askyesno("Подтверждение", "Сбросить текст к шаблону для текущего получателя?"):
-            self.text_editor.delete('1.0', tk.END)
-            self.text_editor.insert('1.0', self.template_body)
-            
-            # Сохраняем для текущего получателя
-            selection = self.tree.selection()
-            if selection:
-                item = selection[0]
-                index = self.tree.index(item)
-                if index < len(self.email_items):
-                    self.email_items[index]['body'] = self.template_body
-            
-            self.status_bar.config(text="Текст сброшен к шаблону")
+        if self.current_selection < len(self.email_items):
+            values = self.get_current_values()
+            self.email_items[self.current_selection]['placeholder_values'] = values
     
     def preview_email(self):
         """Предпросмотр письма в Outlook"""
+        if not self.draft_path:
+            messagebox.showwarning("Предупреждение", "Сначала загрузите шаблон")
+            return
+        
         selection = self.tree.selection()
         if not selection:
             messagebox.showwarning("Предупреждение", "Выберите получателя")
             return
+        
+        # Сохраняем текущие значения
+        self.save_current_values()
         
         item = selection[0]
         index = self.tree.index(item)
@@ -332,12 +399,16 @@ class EmailBatchSender:
             # Создаем письмо из шаблона
             mail = self.outlook.CreateItemFromTemplate(self.draft_path)
             
+            # Собираем тело письма
+            values = list(email_data['placeholder_values'].values())
+            body = self.build_email_body(self.template_parts, values)
+            
             # Обновляем данные
             mail.To = email_data['to']
             if email_data['cc']:
                 mail.CC = email_data['cc']
             mail.Subject = email_data['subject']
-            mail.Body = email_data['body']
+            mail.Body = body
             
             # Отображаем для предпросмотра
             mail.Display(False)
@@ -348,10 +419,17 @@ class EmailBatchSender:
     
     def open_selected(self):
         """Открыть выбранное письмо для редактирования в Outlook"""
+        if not self.draft_path:
+            messagebox.showwarning("Предупреждение", "Сначала загрузите шаблон")
+            return
+        
         selection = self.tree.selection()
         if not selection:
             messagebox.showwarning("Предупреждение", "Выберите получателя")
             return
+        
+        # Сохраняем текущие значения
+        self.save_current_values()
         
         item = selection[0]
         index = self.tree.index(item)
@@ -365,12 +443,16 @@ class EmailBatchSender:
             # Создаем письмо из шаблона
             mail = self.outlook.CreateItemFromTemplate(self.draft_path)
             
+            # Собираем тело письма
+            values = list(email_data['placeholder_values'].values())
+            body = self.build_email_body(self.template_parts, values)
+            
             # Обновляем данные
             mail.To = email_data['to']
             if email_data['cc']:
                 mail.CC = email_data['cc']
             mail.Subject = email_data['subject']
-            mail.Body = email_data['body']
+            mail.Body = body
             
             # Отображаем для редактирования
             mail.Display(False)
@@ -381,21 +463,32 @@ class EmailBatchSender:
     
     def send_all(self):
         """Отправка всех писем"""
+        if not self.draft_path:
+            messagebox.showwarning("Предупреждение", "Сначала загрузите шаблон")
+            return
+        
         if not self.email_items:
             messagebox.showwarning("Предупреждение", "Нет получателей для отправки")
             return
         
-        # Проверяем, все ли тексты заполнены
-        empty_texts = []
-        for i, email_data in enumerate(self.email_items):
-            if not email_data.get('body', '').strip():
-                empty_texts.append(str(i + 1))
+        # Сохраняем текущие значения
+        self.save_current_values()
         
-        if empty_texts:
-            messagebox.showwarning("Предупреждение", 
-                f"У следующих получателей пустой текст письма: {', '.join(empty_texts)}\n"
-                "Заполните текст перед отправкой.")
-            return
+        # Проверяем, все ли плейсхолдеры заполнены
+        empty_placeholders = []
+        for i, email_data in enumerate(self.email_items):
+            values = email_data.get('placeholder_values', {})
+            for placeholder, value in values.items():
+                if not value.strip():
+                    empty_placeholders.append(f"Письмо #{i+1} ({email_data['to']}): {{{placeholder}}}")
+        
+        if empty_placeholders:
+            if not messagebox.askyesno("Предупреждение", 
+                f"Следующие плейсхолдеры не заполнены:\n\n" + 
+                "\n".join(empty_placeholders[:5]) + 
+                ("\n..." if len(empty_placeholders) > 5 else "") +
+                "\n\nПродолжить отправку?"):
+                return
         
         # Подтверждение отправки
         count = len(self.email_items)
@@ -413,12 +506,16 @@ class EmailBatchSender:
                 # Создаем письмо из шаблона
                 mail = self.outlook.CreateItemFromTemplate(self.draft_path)
                 
+                # Собираем тело письма
+                values = list(email_data['placeholder_values'].values())
+                body = self.build_email_body(self.template_parts, values)
+                
                 # Обновляем данные
                 mail.To = email_data['to']
                 if email_data['cc']:
                     mail.CC = email_data['cc']
                 mail.Subject = email_data['subject']
-                mail.Body = email_data['body']
+                mail.Body = body
                 
                 # Отправляем
                 mail.Send()
@@ -440,6 +537,26 @@ class EmailBatchSender:
         
         self.status_bar.config(text=f"Отправлено {sent} писем")
     
+    def clear_all_fields(self):
+        """Очистка всех полей ввода"""
+        if messagebox.askyesno("Подтверждение", "Очистить все поля для текущего получателя?"):
+            for entry in self.placeholder_widgets.values():
+                entry.delete(0, tk.END)
+            self.save_current_values()
+            self.status_bar.config(text="Поля очищены")
+    
+    def fill_test_data(self):
+        """Заполнение тестовыми данными"""
+        if not self.placeholders:
+            return
+        
+        for placeholder, entry in self.placeholder_widgets.items():
+            entry.delete(0, tk.END)
+            entry.insert(0, f"Тестовое значение для {placeholder}")
+        
+        self.save_current_values()
+        self.status_bar.config(text="Поля заполнены тестовыми данными")
+    
     def update_tree(self):
         """Обновление списка получателей"""
         # Очищаем дерево
@@ -448,25 +565,120 @@ class EmailBatchSender:
         
         # Добавляем получателей
         for i, email_data in enumerate(self.email_items, 1):
-            # Проверяем, есть ли текст
-            has_text = bool(email_data.get('body', '').strip())
+            # Проверяем, все ли плейсхолдеры заполнены
+            values = email_data.get('placeholder_values', {})
+            all_filled = all(value.strip() for value in values.values()) if values else True
+            
             subject = email_data.get('subject', '')
             
             # Добавляем в дерево
-            self.tree.insert('', 'end', values=(
+            item = self.tree.insert('', 'end', values=(
                 i,
                 email_data['to'],
                 email_data.get('cc', ''),
                 subject[:30] + '...' if len(subject) > 30 else subject
             ))
             
-            # Меняем цвет если текст пустой
-            if not has_text:
-                item = self.tree.get_children()[-1]
+            # Меняем цвет если не все поля заполнены
+            if not all_filled:
                 self.tree.item(item, tags=('empty',))
         
         # Настройка тегов
         self.tree.tag_configure('empty', background='#ffe6e6')
+    
+    def export_data(self):
+        """Экспорт данных в JSON файл"""
+        if not self.email_items:
+            messagebox.showwarning("Предупреждение", "Нет данных для экспорта")
+            return
+        
+        file_path = filedialog.asksaveasfilename(
+            title="Сохранить данные",
+            defaultextension=".json",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
+        )
+        
+        if not file_path:
+            return
+        
+        try:
+            # Сохраняем текущие значения
+            self.save_current_values()
+            
+            # Подготавливаем данные для экспорта
+            export_data = {
+                'template_path': self.draft_path,
+                'template_subject': self.template_subject,
+                'placeholders': self.placeholders,
+                'recipients': self.email_items
+            }
+            
+            with open(file_path, 'w', encoding='utf-8') as f:
+                json.dump(export_data, f, ensure_ascii=False, indent=2)
+            
+            messagebox.showinfo("Успех", f"Данные экспортированы в {file_path}")
+            self.status_bar.config(text=f"Данные экспортированы")
+            
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось экспортировать данные: {e}")
+    
+    def import_data(self):
+        """Импорт данных из JSON файла"""
+        file_path = filedialog.askopenfilename(
+            title="Загрузить данные",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
+        )
+        
+        if not file_path:
+            return
+        
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                import_data = json.load(f)
+            
+            # Загружаем шаблон если путь указан
+            if import_data.get('template_path') and os.path.exists(import_data['template_path']):
+                self.draft_path = import_data['template_path']
+                mail = self.outlook.CreateItemFromTemplate(self.draft_path)
+                self.template_body = mail.Body
+                self.template_subject = import_data.get('template_subject', mail.Subject)
+                self.template_parts, self.placeholders = self.parse_template(self.template_body)
+                
+                self.template_info.config(
+                    text=f"Шаблон загружен: {os.path.basename(self.draft_path)} | Плейсхолдеров: {len(self.placeholders)}",
+                    foreground="green"
+                )
+                
+                # Создаем поля ввода
+                for widget in self.placeholder_widgets.values():
+                    widget.destroy()
+                self.placeholder_widgets.clear()
+                
+                for placeholder in self.placeholders:
+                    frame = ttk.Frame(self.scrollable_frame)
+                    frame.pack(fill=tk.X, pady=2)
+                    
+                    label = ttk.Label(frame, text=f"{{{placeholder}}}:", width=20, anchor=tk.W)
+                    label.pack(side=tk.LEFT, padx=5)
+                    
+                    entry = ttk.Entry(frame, width=50)
+                    entry.pack(side=tk.LEFT, padx=5, fill=tk.X, expand=True)
+                    
+                    self.placeholder_widgets[placeholder] = entry
+            
+            # Загружаем получателей
+            self.email_items = import_data.get('recipients', [])
+            self.update_tree()
+            
+            if self.email_items:
+                self.tree.selection_set(self.tree.get_children()[0])
+                self.on_recipient_select(None)
+            
+            messagebox.showinfo("Успех", f"Импортировано {len(self.email_items)} получателей")
+            self.status_bar.config(text=f"Данные импортированы из {os.path.basename(file_path)}")
+            
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось импортировать данные: {e}")
     
     def __del__(self):
         """Очистка при закрытии"""
