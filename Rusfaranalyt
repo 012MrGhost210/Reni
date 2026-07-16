@@ -48,10 +48,11 @@ def load_deals_from_row16(file_path, sheet_name):
         # Назначаем заголовки
         data_rows.columns = headers_row
         
-        # Оставляем только нужные колонки: E, F, G, H
+        # Оставляем только нужные колонки: E, F, G, H, I
         # E - колонка 5 (индекс 4), F - колонка 6 (индекс 5), 
         # G - колонка 7 (индекс 6), H - колонка 8 (индекс 7)
-        cols_to_keep = [4, 5, 6, 7]  # Индексы для E, F, G, H
+        # I - колонка 9 (индекс 8) - СТАВКА
+        cols_to_keep = [4, 5, 6, 7, 8]  # Индексы для E, F, G, H, I
         col_names = [headers_row.iloc[i] for i in cols_to_keep]
         
         # Фильтруем данные
@@ -176,13 +177,29 @@ def main():
     if os.path.exists(FILE_PATH_DEALS):
         df_active_deals = load_deals_from_row16(FILE_PATH_DEALS, SHEET_DEALS)
     
-    # Получаем значения
+    # Получаем значения RUSFAR и банка
     rusfar_value = get_rusfar_value(df_rusfar, rusfar_column)
     bank_rate = get_rusfar_value(df_bank, bank_column)
     
     # Получаем сегодняшнюю сделку
     today_deal = get_today_deal(df_active_deals, is_short_term)
-    today_rate = today_deal.iloc[3] if today_deal is not None else None  # Ставка в колонке H (индекс 3)
+    
+    if today_deal is not None:
+        # Ищем колонку со ставкой (I - 5-я колонка, индекс 4)
+        # Пробуем найти по названию
+        rate_col = None
+        for col in df_active_deals.columns:
+            if 'ставк' in str(col).lower() or 'rate' in str(col).lower():
+                rate_col = col
+                break
+        
+        if rate_col:
+            today_rate = today_deal[rate_col]
+        else:
+            # Если не нашли - берем 5-ю колонку (индекс 4, это колонка I)
+            today_rate = today_deal.iloc[4] if len(today_deal) > 4 else None
+    else:
+        today_rate = None
     
     # ============================================
     # ОТОБРАЖЕНИЕ МЕТРИК
@@ -257,14 +274,23 @@ def main():
             ].copy()
             
             if not df_filtered.empty:
-                # Оставляем только колонки E, F, H (первые две и четвёртая)
-                cols_to_display = [df_filtered.columns[0], df_filtered.columns[1], df_filtered.columns[3]]
+                # Оставляем только колонки E, F, H, I (первые две, четвёртая и пятая)
+                cols_to_display = [
+                    df_filtered.columns[0],  # E
+                    df_filtered.columns[1],  # F
+                    df_filtered.columns[3],  # H - дата окончания
+                    df_filtered.columns[4]   # I - ставка
+                ]
                 df_display = df_filtered[cols_to_display].copy()
                 
                 # Форматируем даты для отображения
                 for col in df_display.columns:
-                    if 'дата' in col.lower() or 'date' in col.lower():
+                    if 'дата' in str(col).lower() or 'date' in str(col).lower():
                         df_display[col] = pd.to_datetime(df_display[col]).dt.strftime('%d.%m.%Y')
+                
+                # Форматируем ставку (колонка I - последняя)
+                rate_col_display = df_display.columns[3]
+                df_display[rate_col_display] = df_display[rate_col_display].apply(format_rate)
                 
                 # Показываем таблицу
                 st.dataframe(
@@ -291,8 +317,10 @@ def main():
             if df_active_deals is not None and not df_active_deals.empty:
                 display_df = df_active_deals.copy()
                 for col in display_df.columns:
-                    if 'дата' in col.lower() or 'date' in col.lower():
+                    if 'дата' in str(col).lower() or 'date' in str(col).lower():
                         display_df[col] = pd.to_datetime(display_df[col]).dt.strftime('%d.%m.%Y')
+                    if 'ставк' in str(col).lower() or 'rate' in str(col).lower():
+                        display_df[col] = display_df[col].apply(format_rate)
                 st.dataframe(display_df, use_container_width=True, hide_index=True)
         
         with col_exp2:
