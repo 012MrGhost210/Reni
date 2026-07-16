@@ -16,8 +16,7 @@ st.set_page_config(
     layout="wide"
 )
 
-# --- Загрузка данных ---
-@st.cache_data
+# --- Загрузка данных (без кэширования, чтобы можно было обновлять) ---
 def load_data(file_path):
     """Загружает данные из файла Coupon_events.xlsx"""
     try:
@@ -49,8 +48,26 @@ def get_portfolio_color(portfolio_name, idx):
     ]
     return colors[idx % len(colors)]
 
-# --- Загружаем данные ---
-df = load_data(DATA_FILE_PATH)
+# --- Инициализация состояния ---
+if 'data' not in st.session_state:
+    st.session_state.data = None
+if 'last_loaded' not in st.session_state:
+    st.session_state.last_loaded = None
+
+# --- Загружаем данные (с возможностью обновления) ---
+def refresh_data():
+    """Принудительно обновляет данные из файла"""
+    with st.spinner("Обновление данных..."):
+        st.session_state.data = load_data(DATA_FILE_PATH)
+        st.session_state.last_loaded = datetime.now().strftime("%H:%M:%S")
+    st.rerun()
+
+# Если данные не загружены - загружаем
+if st.session_state.data is None:
+    st.session_state.data = load_data(DATA_FILE_PATH)
+    st.session_state.last_loaded = datetime.now().strftime("%H:%M:%S")
+
+df = st.session_state.data
 
 if df.empty:
     st.error("Нет данных. Проверьте путь к файлу.")
@@ -62,26 +79,40 @@ st.title("📅 Календарь купонов")
 with st.sidebar:
     st.header("🎯 Фильтры")
     
-    # Получаем список всех портфелей
-    all_portfolios = sorted(df['PORTFOLIO'].unique().tolist())
-    
-    # Выбор портфелей
-    selected_portfolios = st.multiselect(
-        "Выберите портфели",
-        options=all_portfolios,
-        default=all_portfolios,
-        help="Выберите один или несколько портфелей"
-    )
+    # Кнопка обновления
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        st.caption(f"Загружено: {st.session_state.last_loaded}")
+    with col2:
+        if st.button("🔄", help="Обновить данные из файла"):
+            refresh_data()
     
     st.divider()
     
-    # Выбор УК
+    # Получаем список всех УК
     all_uk = sorted(df['MANAGEMENT_COMPANY'].unique().tolist())
+    
+    # Выбор УК
     selected_uk = st.multiselect(
         "Выберите управляющие компании",
         options=all_uk,
         default=all_uk,
         help="Выберите одну или несколько УК"
+    )
+    
+    # Фильтруем портфели по выбранным УК
+    if selected_uk:
+        filtered_for_uk = df[df['MANAGEMENT_COMPANY'].isin(selected_uk)]
+        available_portfolios = sorted(filtered_for_uk['PORTFOLIO'].unique().tolist())
+    else:
+        available_portfolios = sorted(df['PORTFOLIO'].unique().tolist())
+    
+    # Выбор портфелей (только те, которые есть у выбранных УК)
+    selected_portfolios = st.multiselect(
+        "Выберите портфели",
+        options=available_portfolios,
+        default=available_portfolios,
+        help="Выберите один или несколько портфелей"
     )
     
     st.divider()
@@ -96,7 +127,7 @@ with st.sidebar:
     year = st.selectbox(
         "Год", 
         available_years, 
-        index=len(available_years) - 1  # По умолчанию последний доступный год
+        index=len(available_years) - 1
     )
     
     # Доступные месяцы (все 12)
@@ -104,25 +135,27 @@ with st.sidebar:
         "Месяц", 
         list(range(1, 13)),
         format_func=lambda x: calendar.month_name[x],
-        index=datetime.now().month - 1  # По умолчанию текущий месяц
+        index=datetime.now().month - 1
     )
     
     st.divider()
     
     # Статистика
     st.markdown("### 📊 Статистика")
-    filtered_df = df[
+    
+    # Применяем все фильтры для статистики
+    temp_filtered = df[
         (df['PORTFOLIO'].isin(selected_portfolios)) &
         (df['MANAGEMENT_COMPANY'].isin(selected_uk))
     ]
-    st.metric("Всего купонов", len(filtered_df))
-    st.metric("Уникальных ISIN", filtered_df['ISIN'].nunique())
-    st.metric("Уникальных портфелей", filtered_df['PORTFOLIO'].nunique())
+    st.metric("Всего купонов", len(temp_filtered))
+    st.metric("Уникальных ISIN", temp_filtered['ISIN'].nunique())
+    st.metric("Уникальных портфелей", temp_filtered['PORTFOLIO'].nunique())
 
 # --- Основной контент ---
 st.markdown(f"## {calendar.month_name[month]} {year}")
 
-# Фильтруем данные
+# Применяем фильтры
 filtered_df = df[
     (df['PORTFOLIO'].isin(selected_portfolios)) &
     (df['MANAGEMENT_COMPANY'].isin(selected_uk))
