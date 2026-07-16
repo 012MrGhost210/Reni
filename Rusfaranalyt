@@ -23,23 +23,38 @@ def load_sheet_data(file_path, sheet_name):
         return None
 
 def load_deals_from_row16(file_path, sheet_name):
+    """
+    Загружает сделки из файла, начиная с 16 строки и заканчивая 19 строкой.
+    Заголовки в строке 16, данные в строках 17-19.
+    """
     try:
+        # Загружаем весь лист без заголовков
         df_raw = pd.read_excel(file_path, sheet_name=sheet_name, header=None)
         
+        # Проверяем, что в файле достаточно строк
         if len(df_raw) < 16:
             st.warning(f"В файле меньше 16 строк. Найдено: {len(df_raw)}")
             return None
         
+        # Заголовки - строка 16 (индекс 15)
         headers_row = df_raw.iloc[15]
-        data_rows = df_raw.iloc[16:].copy()
+        
+        # Данные ТОЛЬКО со строк 17-19 (индексы 16, 17, 18)
+        # Но не дальше 19 строки
+        max_row = min(19, len(df_raw))  # Берем до 19 строки или до конца файла
+        data_rows = df_raw.iloc[16:max_row].copy()
+        
+        # Назначаем заголовки
         data_rows.columns = headers_row
         
-        # Оставляем E, F, G, H (индексы 4,5,6,7)
+        # Оставляем только нужные колонки: E, F, G, H (индексы 4,5,6,7)
         cols_to_keep = [4, 5, 6, 7]
         col_names = [headers_row.iloc[i] for i in cols_to_keep]
         
         df_result = data_rows.iloc[:, cols_to_keep].copy()
         df_result.columns = col_names
+        
+        # Удаляем строки, где все значения пустые
         df_result = df_result.dropna(how='all')
         
         return df_result
