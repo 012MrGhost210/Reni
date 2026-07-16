@@ -1,0 +1,206 @@
+import streamlit as st
+import pandas as pd
+from datetime import datetime
+import os
+
+# !!! УКАЖИ ПУТЬ К ТВОЕМУ ФАЙЛУ !!!
+FILE_PATH = r"C:\Users\YourName\Desktop\Русфар аналитика.xlsx"
+
+# Названия листов в файле
+SHEET_LESS_7 = "Срок меньше 7"
+SHEET_MORE_7 = "Срок больше 7 дней"
+SHEET_RUSFAR = "Rusfar"
+SHEET_BANK = "Банк"
+
+def load_sheet_data(file_path, sheet_name):
+    """Загружает данные из указанного листа"""
+    try:
+        df = pd.read_excel(file_path, sheet_name=sheet_name)
+        return df
+    except Exception as e:
+        st.error(f"Ошибка загрузки листа '{sheet_name}': {e}")
+        return None
+
+def get_last_rate(df):
+    """Получает последнюю ставку из DataFrame"""
+    if df is None or df.empty:
+        return None
+    # Берем последнюю строку
+    last_row = df.iloc[-1]
+    return last_row.get('Ставка', None)
+
+def get_rusfar_value(df, column_name):
+    """Получает значение RUSFAR из указанной колонки"""
+    if df is None or df.empty:
+        return None
+    last_row = df.iloc[-1]
+    return last_row.get(column_name, None)
+
+def format_rate(value):
+    """Форматирует ставку в процентный вид"""
+    if value is None or pd.isna(value):
+        return "Н/Д"
+    if isinstance(value, (int, float)):
+        return f"{value * 100:.2f}%" if value < 1 else f"{value:.2f}%"
+    return str(value)
+
+def main():
+    # Настройка страницы
+    st.set_page_config(
+        page_title="Аналитика ставок",
+        page_icon="📊",
+        layout="centered"
+    )
+    
+    # Заголовок
+    st.title("📊 Аналитика ставок")
+    st.markdown("---")
+    
+    # Проверка существования файла
+    if not os.path.exists(FILE_PATH):
+        st.error(f"❌ Файл не найден по пути:\n`{FILE_PATH}`")
+        st.info("Убедись, что файл существует и путь указан верно.")
+        return
+    
+    # Переключатель
+    option = st.radio(
+        "Выбери индикатор:",
+        ["RUSFAR (1 день)", "RUSFAR 1W (7 дней)"],
+        index=0,
+        horizontal=True
+    )
+    
+    # Определяем, какие данные показывать
+    if option == "RUSFAR (1 день)":
+        deals_sheet = SHEET_LESS_7
+        rusfar_column = "RUSFAR"
+        bank_column = "Ставка на день"
+        title = "RUSFAR (овернайт)"
+    else:
+        deals_sheet = SHEET_MORE_7
+        rusfar_column = "RUSFAR1W"
+        bank_column = "Ставка на неделю"
+        title = "RUSFAR 1W"
+    
+    # Загружаем все нужные листы
+    df_deals = load_sheet_data(FILE_PATH, deals_sheet)
+    df_rusfar = load_sheet_data(FILE_PATH, SHEET_RUSFAR)
+    df_bank = load_sheet_data(FILE_PATH, SHEET_BANK)
+    
+    # Получаем значения
+    last_deal_rate = get_last_rate(df_deals)
+    rusfar_value = get_rusfar_value(df_rusfar, rusfar_column)
+    bank_rate = get_rusfar_value(df_bank, bank_column)
+    
+    # Показываем дату выгрузки
+    col_date1, col_date2, col_date3 = st.columns(3)
+    
+    if df_deals is not None and not df_deals.empty:
+        last_date = df_deals.iloc[-1].get('Дата размещения', None)
+        if last_date:
+            with col_date1:
+                st.caption("📅 Дата сделки")
+                st.write(pd.to_datetime(last_date).strftime('%d.%m.%Y'))
+    
+    if df_rusfar is not None and not df_rusfar.empty:
+        rusfar_date = df_rusfar.iloc[-1].get('Дата выгрузки', None)
+        if rusfar_date:
+            with col_date2:
+                st.caption("📅 Дата RUSFAR")
+                st.write(pd.to_datetime(rusfar_date).strftime('%d.%m.%Y'))
+    
+    if df_bank is not None and not df_bank.empty:
+        bank_date = df_bank.iloc[-1].get('Дата выгрузки', None)
+        if bank_date:
+            with col_date3:
+                st.caption("📅 Дата банка")
+                st.write(pd.to_datetime(bank_date).strftime('%d.%m.%Y'))
+    
+    st.markdown("---")
+    
+    # Отображаем три основные метрики
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric(
+            label=f"💹 Последняя ставка по сделкам ({title})",
+            value=format_rate(last_deal_rate),
+            delta=None
+        )
+        # Показываем количество сделок
+        if df_deals is not None and not df_deals.empty:
+            st.caption(f"Всего сделок: {len(df_deals)}")
+    
+    with col2:
+        st.metric(
+            label=f"📈 {rusfar_column}",
+            value=format_rate(rusfar_value),
+            delta=None
+        )
+    
+    with col3:
+        st.metric(
+            label=f"🏦 Ставка банка ({bank_column})",
+            value=format_rate(bank_rate),
+            delta=None
+        )
+    
+    # Дополнительная информация
+    st.markdown("---")
+    
+    # Показываем таблицы с данными (в свёрнутом виде)
+    with st.expander("📋 Посмотреть все сделки"):
+        if df_deals is not None and not df_deals.empty:
+            display_df = df_deals.copy()
+            # Форматируем даты
+            for col in ['Дата размещения', 'Дата окончания']:
+                if col in display_df.columns:
+                    display_df[col] = pd.to_datetime(display_df[col]).dt.strftime('%d.%m.%Y')
+            # Форматируем ставку
+            if 'Ставка' in display_df.columns:
+                display_df['Ставка'] = display_df['Ставка'].apply(
+                    lambda x: f"{x*100:.2f}%" if isinstance(x, (int, float)) and x < 1 else f"{x:.2f}%" if isinstance(x, (int, float)) else x
+                )
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+        else:
+            st.info("Нет данных по сделкам")
+    
+    with st.expander("📊 Посмотреть данные RUSFAR"):
+        if df_rusfar is not None and not df_rusfar.empty:
+            display_df = df_rusfar.copy()
+            if 'Дата выгрузки' in display_df.columns:
+                display_df['Дата выгрузки'] = pd.to_datetime(display_df['Дата выгрузки']).dt.strftime('%d.%m.%Y')
+            # Форматируем проценты
+            for col in ['RUSFAR', 'RUSFAR1W']:
+                if col in display_df.columns:
+                    display_df[col] = display_df[col].apply(
+                        lambda x: f"{x*100:.2f}%" if isinstance(x, (int, float)) and x < 1 else f"{x:.2f}%" if isinstance(x, (int, float)) else x
+                    )
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+        else:
+            st.info("Нет данных по RUSFAR")
+    
+    with st.expander("🏦 Посмотреть данные банка"):
+        if df_bank is not None and not df_bank.empty:
+            display_df = df_bank.copy()
+            if 'Дата выгрузки' in display_df.columns:
+                display_df['Дата выгрузки'] = pd.to_datetime(display_df['Дата выгрузки']).dt.strftime('%d.%m.%Y')
+            for col in ['Ставка на день', 'Ставка на неделю']:
+                if col in display_df.columns:
+                    display_df[col] = display_df[col].apply(
+                        lambda x: f"{x*100:.2f}%" if isinstance(x, (int, float)) and x < 1 else f"{x:.2f}%" if isinstance(x, (int, float)) else x
+                    )
+            st.dataframe(display_df, use_container_width=True, hide_index=True)
+        else:
+            st.info("Нет данных по банку")
+    
+    # Кнопка обновления
+    st.markdown("---")
+    if st.button("🔄 Обновить данные", use_container_width=True):
+        st.rerun()
+    
+    # Информация о файле
+    st.caption(f"📁 Источник данных: `{os.path.basename(FILE_PATH)}`")
+
+if __name__ == "__main__":
+    main()
