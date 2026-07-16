@@ -4,20 +4,17 @@ from datetime import datetime, timedelta
 import os
 
 # !!! УКАЖИ ПУТИ К ФАЙЛАМ !!!
-FILE_PATH_MAIN = r"C:\Users\YourName\Desktop\Русфар аналитика.xlsx"  # Основной файл со ставками
-FILE_PATH_DEALS = r"C:\Users\YourName\Desktop\Депозиты_и_репо.xlsx"  # Файл с действующими сделками
+FILE_PATH_MAIN = r"C:\Users\YourName\Desktop\Русфар аналитика.xlsx"
+FILE_PATH_DEALS = r"C:\Users\YourName\Desktop\Депозиты_и_репо.xlsx"
 
-# Названия листов в основном файле
+# Названия листов
 SHEET_LESS_7 = "Срок меньше 7"
 SHEET_MORE_7 = "Срок больше 7 дней"
 SHEET_RUSFAR = "Rusfar"
 SHEET_BANK = "Банк"
-
-# Название листа в файле со сделками
 SHEET_DEALS = "Депозиты и репо"
 
 def load_sheet_data(file_path, sheet_name):
-    """Загружает данные из указанного листа"""
     try:
         df = pd.read_excel(file_path, sheet_name=sheet_name)
         return df
@@ -26,40 +23,23 @@ def load_sheet_data(file_path, sheet_name):
         return None
 
 def load_deals_from_row16(file_path, sheet_name):
-    """
-    Загружает сделки из файла, начиная с 16 строки.
-    Заголовки в строке 16, данные с 17 строки.
-    """
     try:
-        # Загружаем весь лист без заголовков
         df_raw = pd.read_excel(file_path, sheet_name=sheet_name, header=None)
         
-        # Проверяем, что в файле достаточно строк
         if len(df_raw) < 16:
             st.warning(f"В файле меньше 16 строк. Найдено: {len(df_raw)}")
             return None
         
-        # Заголовки - строка 16 (индекс 15)
         headers_row = df_raw.iloc[15]
-        
-        # Данные начинаются с 17 строки (индекс 16) до конца
         data_rows = df_raw.iloc[16:].copy()
-        
-        # Назначаем заголовки
         data_rows.columns = headers_row
         
-        # Оставляем только нужные колонки: E, F, G, H, I
-        # E - колонка 5 (индекс 4), F - колонка 6 (индекс 5), 
-        # G - колонка 7 (индекс 6), H - колонка 8 (индекс 7)
-        # I - колонка 9 (индекс 8) - СТАВКА
-        cols_to_keep = [4, 5, 6, 7, 8]  # Индексы для E, F, G, H, I
+        # Оставляем E, F, G, H (индексы 4,5,6,7)
+        cols_to_keep = [4, 5, 6, 7]
         col_names = [headers_row.iloc[i] for i in cols_to_keep]
         
-        # Фильтруем данные
         df_result = data_rows.iloc[:, cols_to_keep].copy()
         df_result.columns = col_names
-        
-        # Удаляем строки, где все значения пустые
         df_result = df_result.dropna(how='all')
         
         return df_result
@@ -69,86 +49,63 @@ def load_deals_from_row16(file_path, sheet_name):
         return None
 
 def get_rusfar_value(df, column_name):
-    """Получает значение RUSFAR из указанной колонки"""
     if df is None or df.empty:
         return None
     last_row = df.iloc[-1]
     return last_row.get(column_name, None)
 
 def format_rate(value):
-    """Форматирует ставку в процентный вид"""
     if value is None or pd.isna(value):
         return "—"
     if isinstance(value, (int, float)):
-        if value < 1:  # Если значение в долях (0.145)
+        if value < 1:
             return f"{value * 100:.2f}%"
-        else:  # Если уже в процентах (14.5)
+        else:
             return f"{value:.2f}%"
     return str(value)
 
 def get_today_deal(df_deals, is_short_term=True):
-    """
-    Находит сделку на сегодня из данных сделок.
-    is_short_term: True - ищем с разницей < 7 дней, False - >= 7 дней
-    """
     if df_deals is None or df_deals.empty:
         return None
     
-    # Получаем сегодняшнюю дату
     today = datetime.now().date()
     
-    # Находим колонки с датами (G и H - 3-я и 4-я колонки в нашем DataFrame)
-    date_start_col = df_deals.columns[2]  # G - дата размещения
-    date_end_col = df_deals.columns[3]    # H - дата окончания
+    date_start_col = df_deals.columns[2]  # G
+    date_end_col = df_deals.columns[3]    # H
     
-    # Приводим даты к datetime
     df_deals[date_start_col] = pd.to_datetime(df_deals[date_start_col], errors='coerce')
     df_deals[date_end_col] = pd.to_datetime(df_deals[date_end_col], errors='coerce')
     
-    # Оставляем только строки с валидными датами
     df_valid = df_deals.dropna(subset=[date_start_col, date_end_col])
-    
-    # Находим сделки на сегодня
     df_today = df_valid[df_valid[date_start_col].dt.date == today]
     
     if df_today.empty:
         return None
     
-    # Для каждой сделки считаем разницу в днях
     for idx, row in df_today.iterrows():
         delta = (row[date_end_col] - row[date_start_col]).days
         
-        # Проверяем соответствие длительности
         if is_short_term and delta < 7:
             return row
         elif not is_short_term and delta >= 7:
             return row
     
-    # Если не нашли подходящую сделку
     return None
 
 def main():
-    # Настройка страницы
     st.set_page_config(
         page_title="Аналитика ставок",
         page_icon="📊",
         layout="wide"
     )
     
-    # Заголовок
     st.title("📊 Аналитика ставок")
     st.markdown("---")
     
-    # Проверка существования основного файла
     if not os.path.exists(FILE_PATH_MAIN):
         st.error(f"❌ Основной файл не найден:\n`{FILE_PATH_MAIN}`")
         return
     
-    # ============================================
-    # ОСНОВНАЯ ЧАСТЬ - ставки и индикаторы
-    # ============================================
-    
-    # Переключатель
     option = st.radio(
         "Выбери индикатор:",
         ["RUSFAR (1 день)", "RUSFAR 1W (7 дней)"],
@@ -156,7 +113,6 @@ def main():
         horizontal=True
     )
     
-    # Определяем, какие данные показывать
     if option == "RUSFAR (1 день)":
         rusfar_column = "RUSFAR"
         bank_column = "Ставка на день"
@@ -168,25 +124,20 @@ def main():
         title = "7-дневная"
         is_short_term = False
     
-    # Загружаем данные из основного файла
     df_rusfar = load_sheet_data(FILE_PATH_MAIN, SHEET_RUSFAR)
     df_bank = load_sheet_data(FILE_PATH_MAIN, SHEET_BANK)
     
-    # Загружаем сделки из файла с депозитами
     df_active_deals = None
     if os.path.exists(FILE_PATH_DEALS):
         df_active_deals = load_deals_from_row16(FILE_PATH_DEALS, SHEET_DEALS)
     
-    # Получаем значения RUSFAR и банка
     rusfar_value = get_rusfar_value(df_rusfar, rusfar_column)
     bank_rate = get_rusfar_value(df_bank, bank_column)
     
-    # Получаем сегодняшнюю сделку
     today_deal = get_today_deal(df_active_deals, is_short_term)
     
     if today_deal is not None:
-        # Ищем колонку со ставкой (I - 5-я колонка, индекс 4)
-        # Пробуем найти по названию
+        # Ставка в колонке F (вторая, индекс 1)
         rate_col = None
         for col in df_active_deals.columns:
             if 'ставк' in str(col).lower() or 'rate' in str(col).lower():
@@ -196,14 +147,9 @@ def main():
         if rate_col:
             today_rate = today_deal[rate_col]
         else:
-            # Если не нашли - берем 5-ю колонку (индекс 4, это колонка I)
-            today_rate = today_deal.iloc[4] if len(today_deal) > 4 else None
+            today_rate = today_deal.iloc[1] if len(today_deal) > 1 else None
     else:
         today_rate = None
-    
-    # ============================================
-    # ОТОБРАЖЕНИЕ МЕТРИК
-    # ============================================
     
     col1, col2, col3 = st.columns(3)
     
@@ -214,9 +160,8 @@ def main():
             delta=None
         )
         if today_deal is not None:
-            # Показываем дату сделки
-            date_start = today_deal.iloc[2]  # G - дата размещения
-            date_end = today_deal.iloc[3]    # H - дата окончания
+            date_start = today_deal.iloc[2]
+            date_end = today_deal.iloc[3]
             st.caption(f"📅 {pd.to_datetime(date_start).strftime('%d.%m.%Y')} → {pd.to_datetime(date_end).strftime('%d.%m.%Y')}")
     
     with col2:
@@ -225,7 +170,6 @@ def main():
             value=format_rate(rusfar_value),
             delta=None
         )
-        # Показываем дату RUSFAR
         if df_rusfar is not None and not df_rusfar.empty:
             last_date = df_rusfar.iloc[-1].get('Дата выгрузки', None)
             if last_date:
@@ -237,7 +181,6 @@ def main():
             value=format_rate(bank_rate),
             delta=None
         )
-        # Показываем дату банка
         if df_bank is not None and not df_bank.empty:
             last_date = df_bank.iloc[-1].get('Дата выгрузки', None)
             if last_date:
@@ -245,54 +188,40 @@ def main():
     
     st.markdown("---")
     
-    # ============================================
-    # ДЕЙСТВУЮЩИЕ СДЕЛКИ ИЗ ДРУГОГО ФАЙЛА
-    # ============================================
-    
     st.subheader("📋 Действующие сделки (Депозиты и репо)")
     
-    # Проверяем существование файла со сделками
     if not os.path.exists(FILE_PATH_DEALS):
         st.warning(f"⚠️ Файл со сделками не найден:\n`{FILE_PATH_DEALS}`")
         st.info("Укажи правильный путь в переменной `FILE_PATH_DEALS`")
     else:
         if df_active_deals is not None and not df_active_deals.empty:
-            # Находим колонку с датой окончания (H) - это четвёртая колонка (индекс 3)
             date_end_col = df_active_deals.columns[3]
-            
-            # Приводим дату окончания к datetime
             df_active_deals[date_end_col] = pd.to_datetime(df_active_deals[date_end_col], errors='coerce')
             
-            # Получаем сегодняшнюю дату
             today = datetime.now().date()
             
-            # Фильтруем: оставляем только те, где дата окончания >= сегодня
-            # И удаляем строки с пустой датой
             df_filtered = df_active_deals[
                 (df_active_deals[date_end_col].dt.date >= today) & 
                 (df_active_deals[date_end_col].notna())
             ].copy()
             
             if not df_filtered.empty:
-                # Оставляем только колонки E, F, H, I (первые две, четвёртая и пятая)
+                # Показываем E, F, H (E - индекс 0, F - индекс 1, H - индекс 3)
                 cols_to_display = [
                     df_filtered.columns[0],  # E
-                    df_filtered.columns[1],  # F
-                    df_filtered.columns[3],  # H - дата окончания
-                    df_filtered.columns[4]   # I - ставка
+                    df_filtered.columns[1],  # F - СТАВКА
+                    df_filtered.columns[3]   # H - дата окончания
                 ]
                 df_display = df_filtered[cols_to_display].copy()
                 
-                # Форматируем даты для отображения
                 for col in df_display.columns:
                     if 'дата' in str(col).lower() or 'date' in str(col).lower():
                         df_display[col] = pd.to_datetime(df_display[col]).dt.strftime('%d.%m.%Y')
                 
-                # Форматируем ставку (колонка I - последняя)
-                rate_col_display = df_display.columns[3]
+                # Форматируем ставку (вторая колонка)
+                rate_col_display = df_display.columns[1]
                 df_display[rate_col_display] = df_display[rate_col_display].apply(format_rate)
                 
-                # Показываем таблицу
                 st.dataframe(
                     df_display,
                     use_container_width=True,
@@ -304,10 +233,6 @@ def main():
                 st.info("Нет действующих сделок (все даты окончания прошли)")
         else:
             st.info("Нет данных по сделкам в файле")
-    
-    # ============================================
-    # ДОПОЛНИТЕЛЬНЫЕ ДАННЫЕ (в свёрнутом виде)
-    # ============================================
     
     with st.expander("📊 Посмотреть исторические данные"):
         col_exp1, col_exp2, col_exp3 = st.columns(3)
@@ -345,12 +270,10 @@ def main():
                         display_df[col] = display_df[col].apply(format_rate)
                 st.dataframe(display_df, use_container_width=True, hide_index=True)
     
-    # Кнопка обновления
     st.markdown("---")
     if st.button("🔄 Обновить все данные", use_container_width=True):
         st.rerun()
     
-    # Информация о файлах
     st.caption(f"📁 Основной файл: `{os.path.basename(FILE_PATH_MAIN)}`")
     st.caption(f"📁 Файл со сделками: `{os.path.basename(FILE_PATH_DEALS)}`")
 
