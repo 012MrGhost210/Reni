@@ -1,5 +1,4 @@
 import openpyxl
-from openpyxl.utils.cell import get_column_letter
 from datetime import datetime, date
 import os
 
@@ -7,7 +6,6 @@ import os
 path_to_source = r"C:\Users\YourName\Desktop\Твой_файл.xlsx" 
 
 # !!! СЮДА ВСТАВЬ ПУТЬ ДЛЯ СОХРАНЕНИЯ НОВОГО ФАЙЛА !!!
-# Например: r"C:\Users\YourName\Desktop\Новая_папка\Активные_сделки.xlsx"
 path_to_save = r"C:\Users\YourName\Desktop\Активные_сделки.xlsx" 
 
 # Имя листа, где лежат данные
@@ -19,13 +17,13 @@ def main():
         print(f"Ошибка: Исходный файл не найден по пути {path_to_source}")
         return
 
-    # 2. Проверяем, существует ли папка для сохранения (если нет - создаем)
+    # 2. Проверяем папку для сохранения
     save_dir = os.path.dirname(path_to_save)
     if save_dir and not os.path.exists(save_dir):
         print(f"Папка для сохранения не найдена. Создаю: {save_dir}")
         os.makedirs(save_dir)
 
-    # 3. Открываем исходный файл (только для чтения данных)
+    # 3. Открываем исходный файл
     print("Открываю исходный файл...")
     wb_source = openpyxl.load_workbook(path_to_source, data_only=True)
     
@@ -34,32 +32,11 @@ def main():
         return
         
     sheet_source = wb_source[SHEET_NAME]
-    
-    # 4. Определяем заголовки (берем первую строку)
-    headers = []
-    for col in range(1, sheet_source.max_column + 1):
-        cell_value = sheet_source.cell(row=1, column=col).value
-        headers.append(cell_value)
 
-    # Находим индексы нужных колонок (поиск по заголовкам)
-    col_C_name = sheet_source.cell(row=1, column=3).value
-    col_D_name = sheet_source.cell(row=1, column=4).value
-    col_Z_name = sheet_source.cell(row=1, column=26).value
-    
-    # Если в первой строке нет названий (пусто), то используем стандартные имена
-    if not col_C_name:
-        col_C_name = "Дата размещения"
-    if not col_D_name:
-        col_D_name = "Дата окончания"
-    if not col_Z_name:
-        col_Z_name = "Ставка"
-
-    print(f"Найдены столбцы: '{col_C_name}' (C), '{col_D_name}' (D), '{col_Z_name}' (Z)")
-
-    # 5. Создаем новую книгу для результатов
+    # 4. Создаем новую книгу
     wb_result = openpyxl.Workbook()
     
-    # Удаляем дефолтный лист "Sheet", чтобы создать свои
+    # Удаляем дефолтный лист
     default_sheet = wb_result.active
     wb_result.remove(default_sheet)
     
@@ -67,79 +44,70 @@ def main():
     sheet_7plus = wb_result.create_sheet("Срок_от_7_дней")
     sheet_less7 = wb_result.create_sheet("Срок_меньше_7")
     
-    # 6. Функция для копирования строки (значений) на нужный лист
-    def copy_row_to_sheet(target_sheet, source_row_data, target_row_num):
-        # source_row_data - это список значений ячеек из исходного файла
-        for col_idx, value in enumerate(source_row_data, start=1):
-            target_sheet.cell(row=target_row_num, column=col_idx, value=value)
+    # 5. Функция для записи строки (только 3 столбца: C, D, Z)
+    def write_row(target_sheet, row_num, date_start, date_end, rate):
+        target_sheet.cell(row=row_num, column=1, value=date_start)  # Столбец A (бывший C)
+        target_sheet.cell(row=row_num, column=2, value=date_end)    # Столбец B (бывший D)
+        target_sheet.cell(row=row_num, column=3, value=rate)        # Столбец C (бывший Z)
 
-    # Копируем заголовки (первая строка) в оба новых листа
-    header_row_data = []
-    for col in range(1, sheet_source.max_column + 1):
-        header_row_data.append(sheet_source.cell(row=1, column=col).value)
-    
-    copy_row_to_sheet(sheet_7plus, header_row_data, 1)
-    copy_row_to_sheet(sheet_less7, header_row_data, 1)
+    # 6. Записываем заголовки
+    write_row(sheet_7plus, 1, "Дата размещения", "Дата окончания", "Ставка")
+    write_row(sheet_less7, 1, "Дата размещения", "Дата окончания", "Ставка")
 
-    # Счетчики для строк, куда будем вставлять данные (начинаем со 2-й, т.к. 1-я занята заголовками)
+    # Счетчики строк
     row_7plus = 2
     row_less7 = 2
 
-    # 7. Получаем сегодняшнюю дату
+    # 7. Сегодняшняя дата
     today = datetime.now().date()
     print(f"Сегодня: {today}")
 
-    # 8. Проходим по всем строкам исходного листа (начиная со 2-й, чтобы пропустить заголовки)
+    # 8. Обрабатываем строки
     print("Обрабатываю сделки...")
     processed_count = 0
     active_count = 0
 
     for row in range(2, sheet_source.max_row + 1):
-        # Забираем значения из колонок C (дата размещения) и D (дата окончания)
+        # Берем только нужные столбцы: C(3), D(4), Z(26)
         date_start = sheet_source.cell(row=row, column=3).value
         date_end = sheet_source.cell(row=row, column=4).value
+        rate = sheet_source.cell(row=row, column=26).value
         
-        # Проверяем, что даты не пустые и являются объектами datetime/date
+        # Проверяем, что даты есть
         if not isinstance(date_start, (datetime, date)) or not isinstance(date_end, (datetime, date)):
-            continue  # Пропускаем строки без дат
+            continue
             
-        # Приводим к типу date (если это datetime, берем только дату)
+        # Приводим к типу date
         if isinstance(date_start, datetime):
             date_start = date_start.date()
         if isinstance(date_end, datetime):
             date_end = date_end.date()
             
-        # Проверяем активность: дата окончания >= сегодня
+        # Проверяем активность
         if date_end >= today:
             active_count += 1
-            # Считаем разницу в днях
             delta = (date_end - date_start).days
             
-            # Собираем все значения ячеек строки в список (чтобы скопировать целиком)
-            row_data = []
-            for col in range(1, sheet_source.max_column + 1):
-                row_data.append(sheet_source.cell(row=row, column=col).value)
-            
-            # Распределяем по листам
+            # Записываем в нужный лист (только 3 столбца)
             if delta >= 7:
-                copy_row_to_sheet(sheet_7plus, row_data, row_7plus)
+                write_row(sheet_7plus, row_7plus, date_start, date_end, rate)
                 row_7plus += 1
             else:
-                copy_row_to_sheet(sheet_less7, row_data, row_less7)
+                write_row(sheet_less7, row_less7, date_start, date_end, rate)
                 row_less7 += 1
                 
         processed_count += 1
 
-    # 9. Сохраняем новый файл по указанному пути
+    # 9. Сохраняем
     wb_result.save(path_to_save)
     
     print(f"\n✅ Готово!")
     print(f"Всего обработано строк: {processed_count}")
     print(f"Найдено активных сделок: {active_count}")
-    print(f"  - Срок >= 7 дней: {row_7plus - 2} шт. (лист 'Срок_от_7_дней')")
-    print(f"  - Срок < 7 дней: {row_less7 - 2} шт. (лист 'Срок_меньше_7')")
-    print(f"\n📁 Новый файл сохранен как: {path_to_save}")
-    print("🔒 Исходный файл остался без изменений.")
+    print(f"  - Срок >= 7 дней: {row_7plus - 2} шт.")
+    print(f"  - Срок < 7 дней: {row_less7 - 2} шт.")
+    print(f"\n📁 Новый файл сохранен: {path_to_save}")
+    print("🔒 Исходный файл не тронут.")
 
 if __name__ == "__main__":
     main()
