@@ -7,7 +7,7 @@ from openpyxl import Workbook, load_workbook
 
 # ============ НАСТРОЙКИ ПУТЕЙ ============
 FILE_PATH_MAIN = r"C:\Users\YourName\Desktop\Русфар аналитика.xlsx"  # Основной файл со ставками
-FILE_PATH_DEALS = r"C:\Users\YourName\Desktop\Депозиты_и_репо.xlsx"  # Файл с действующими сделками
+FILE_PATH_DEALS = r"C:\Users\YourName\Desktop\Депозиты_и_репо.xlsx"  # Файл с действующими сделками (CF)
 FILE_PATH_RUSFAR = r"\\fs-01.renlife.com\alldocs\Финансовый департамент\Treasury\Базы данных(автоматизация)\DI_DATABASE\rusfar.xlsx"  # Файл для RUSFAR
 
 # Названия листов
@@ -55,7 +55,6 @@ def get_rates_from_api():
 
     result = {}
 
-    # Основной источник: marketdata
     md = data.get("marketdata", {})
     cols = md.get("columns", [])
     for row in md.get("data", []):
@@ -68,7 +67,6 @@ def get_rates_from_api():
                 "date": (rec.get("TRADEDATE") or rec.get("SYSTIME") or "")[:10],
             }
 
-    # Запасной: securities
     if not result:
         sec = data.get("securities", {})
         cols = sec.get("columns", [])
@@ -87,7 +85,6 @@ def get_rates_from_api():
 def save_rusfar_to_excel(rates: dict, path: str):
     """Сохраняет ставки RUSFAR в Excel-файл"""
     try:
-        # Создаем папку, если её нет
         os.makedirs(os.path.dirname(path), exist_ok=True)
         
         header = ["Дата значения", "Дата выгрузки"] + RUB_TICKERS
@@ -127,7 +124,6 @@ def load_rusfar_from_excel(path: str):
         if df.empty:
             return None, None
         
-        # Берем последнюю строку
         last_row = df.iloc[-1]
         
         rusfar = last_row.get('RUSFAR', None)
@@ -152,7 +148,7 @@ def load_sheet_data(file_path, sheet_name):
 
 def load_deals_from_row16(file_path, sheet_name):
     """
-    Загружает сделки из файла, начиная с 16 строки и заканчивая 19 строкой.
+    Загружает сделки из файла CF, начиная с 16 строки и заканчивая 19 строкой.
     Заголовки в строке 16, данные в строках 17-19.
     """
     try:
@@ -177,7 +173,40 @@ def load_deals_from_row16(file_path, sheet_name):
         return df_result
         
     except Exception as e:
-        st.error(f"Ошибка загрузки сделок: {e}")
+        st.error(f"Ошибка загрузки сделок из CF: {e}")
+        return None
+
+def load_last_repo_deals(file_path):
+    """
+    Загружает последние сделки репо из основного файла.
+    Берёт данные из листа "Срок меньше 7" или "Срок больше 7 дней".
+    """
+    try:
+        # Пробуем загрузить из "Срок меньше 7"
+        df_less = load_sheet_data(file_path, "Срок меньше 7")
+        df_more = load_sheet_data(file_path, "Срок больше 7 дней")
+        
+        # Объединяем оба листа
+        if df_less is not None and not df_less.empty:
+            df_less['Источник'] = 'Срок меньше 7'
+        if df_more is not None and not df_more.empty:
+            df_more['Источник'] = 'Срок больше 7 дней'
+        
+        # Объединяем
+        dfs = []
+        if df_less is not None and not df_less.empty:
+            dfs.append(df_less)
+        if df_more is not None and not df_more.empty:
+            dfs.append(df_more)
+        
+        if not dfs:
+            return None
+        
+        df_combined = pd.concat(dfs, ignore_index=True)
+        return df_combined
+        
+    except Exception as e:
+        st.error(f"Ошибка загрузки последних сделок репо: {e}")
         return None
 
 def get_bank_rate(df, column_name):
@@ -199,7 +228,7 @@ def format_rate(value):
     return str(value)
 
 def get_today_deal(df_deals, is_short_term=True):
-    """Находит сделку на сегодня из данных сделок"""
+    """Находит сделку на сегодня из данных сделок (из CF)"""
     if df_deals is None or df_deals.empty:
         return None
     
@@ -273,10 +302,13 @@ def main():
     bank_day = get_bank_rate(df_bank, "Ставка на день")
     bank_week = get_bank_rate(df_bank, "Ставка на неделю")
     
-    # Загружаем сделки
-    df_active_deals = None
+    # Загружаем сделки из CF (для актуальной ставки и действующих сделок)
+    df_cf_deals = None
     if os.path.exists(FILE_PATH_DEALS):
-        df_active_deals = load_deals_from_row16(FILE_PATH_DEALS, SHEET_DEALS)
+        df_cf_deals = load_deals_from_row16(FILE_PATH_DEALS, SHEET_DEALS)
+    
+    # Загружаем последние сделки репо из основного файла
+    df_repo_deals = load_last_repo_deals(FILE_PATH_MAIN)
     
     # ============================================
     # ПЕРЕКЛЮЧАТЕЛЬ
@@ -303,12 +335,12 @@ def main():
         is_short_term = False
         rusfar_label = "RUSFAR1W"
     
-    # Получаем сегодняшнюю сделку
-    today_deal = get_today_deal(df_active_deals, is_short_term)
+    # Получаем сегодняшнюю сделку из CF
+    today_deal = get_today_deal(df_cf_deals, is_short_term)
     
     if today_deal is not None:
         rate_col = None
-        for col in df_active_deals.columns:
+        for col in df_cf_deals.columns:
             if 'ставк' in str(col).lower() or 'rate' in str(col).lower():
                 rate_col = col
                 break
@@ -343,7 +375,6 @@ def main():
             value=format_rate(rusfar_display),
             delta=None
         )
-        # Показываем дату из файла RUSFAR
         if os.path.exists(FILE_PATH_RUSFAR):
             try:
                 df_rusfar = pd.read_excel(FILE_PATH_RUSFAR, sheet_name=0)
@@ -360,7 +391,6 @@ def main():
             value=format_rate(bank_display),
             delta=None
         )
-        # Показываем дату банка
         if df_bank is not None and not df_bank.empty:
             last_date = df_bank.iloc[-1].get('Дата выгрузки', None)
             if last_date:
@@ -369,22 +399,22 @@ def main():
     st.markdown("---")
     
     # ============================================
-    # ДЕЙСТВУЮЩИЕ СДЕЛКИ (скрываемые)
+    # ДЕЙСТВУЮЩИЕ СДЕЛКИ (из CF, скрываемые)
     # ============================================
     
     with st.expander("📋 Действующие сделки", expanded=False):
         if not os.path.exists(FILE_PATH_DEALS):
             st.warning(f"⚠️ Файл со сделками не найден:\n`{FILE_PATH_DEALS}`")
         else:
-            if df_active_deals is not None and not df_active_deals.empty:
-                date_end_col = df_active_deals.columns[3]
-                df_active_deals[date_end_col] = pd.to_datetime(df_active_deals[date_end_col], errors='coerce')
+            if df_cf_deals is not None and not df_cf_deals.empty:
+                date_end_col = df_cf_deals.columns[3]
+                df_cf_deals[date_end_col] = pd.to_datetime(df_cf_deals[date_end_col], errors='coerce')
                 
                 today = datetime.now().date()
                 
-                df_filtered = df_active_deals[
-                    (df_active_deals[date_end_col].dt.date >= today) & 
-                    (df_active_deals[date_end_col].notna())
+                df_filtered = df_cf_deals[
+                    (df_cf_deals[date_end_col].dt.date >= today) & 
+                    (df_cf_deals[date_end_col].notna())
                 ].copy()
                 
                 if not df_filtered.empty:
@@ -412,23 +442,24 @@ def main():
                 else:
                     st.info("Нет действующих сделок (все даты окончания прошли)")
             else:
-                st.info("Нет данных по сделкам в файле")
+                st.info("Нет данных по сделкам в файле CF")
     
     # ============================================
-    # ИСТОРИЧЕСКИЕ ДАННЫЕ (только репо)
+    # ИСТОРИЧЕСКИЕ ДАННЫЕ (из основного файла)
     # ============================================
     
     with st.expander("📊 Последние сделки репо"):
-        if df_active_deals is not None and not df_active_deals.empty:
-            display_df = df_active_deals.copy()
+        if df_repo_deals is not None and not df_repo_deals.empty:
+            display_df = df_repo_deals.copy()
             for col in display_df.columns:
                 if 'дата' in str(col).lower() or 'date' in str(col).lower():
                     display_df[col] = pd.to_datetime(display_df[col]).dt.strftime('%d.%m.%Y')
                 if 'ставк' in str(col).lower() or 'rate' in str(col).lower():
                     display_df[col] = display_df[col].apply(format_rate)
             st.dataframe(display_df, use_container_width=True, hide_index=True)
+            st.caption(f"📊 Всего записей: {len(display_df)}")
         else:
-            st.info("Нет данных по сделкам репо")
+            st.info("Нет данных по сделкам репо в основном файле")
     
     # Кнопка обновления всех данных
     st.markdown("---")
@@ -437,7 +468,7 @@ def main():
     
     # Информация о файлах
     st.caption(f"📁 Основной файл: `{os.path.basename(FILE_PATH_MAIN)}`")
-    st.caption(f"📁 Файл со сделками: `{os.path.basename(FILE_PATH_DEALS)}`")
+    st.caption(f"📁 Файл со сделками (CF): `{os.path.basename(FILE_PATH_DEALS)}`")
     st.caption(f"📁 Файл RUSFAR: `{os.path.basename(FILE_PATH_RUSFAR)}`")
 
 if __name__ == "__main__":
