@@ -1,0 +1,144 @@
+"""
+Ставки RUSFAR (руб.) через ISS API Мосбиржи + сохранение в Excel.
+RUSFAR находится на: engine=stock, market=index, board=MMIX.
+Python 3.8+. Зависимости: pip install requests openpyxl
+"""
+
+import os
+from datetime import datetime
+from typing import Optional
+
+import requests
+from openpyxl import Workbook, load_workbook
+
+# ============ НАСТРОЙКИ ============
+EXCEL_PATH = r"\\fs-01.renlife.com\alldocs\Финансовый департамент\Treasury\Базы данных(автоматизация)\DI_DATABASE\rusfar.xlsx"   # <-- ваш путь
+APPEND_MODE = False                     # True - копить историю, False - перезаписывать
+# ===================================
+
+RUB_TICKERS = ["RUSFAR", "RUSFAR1W", "RUSFAR2W", "RUSFAR1M", "RUSFAR3M"]
+
+# Правильный эндпоинт: борд MMIX (Money Market IndeX) на фондовом движке
+URL = "https://iss.moex.com/iss/engines/stock/markets/index/boards/MMIX/securities.json"
+
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                  "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+    "Accept": "application/json",
+}
+
+
+def _get_json(url: str, params: dict) -> Optional[dict]:
+    try:
+        resp = requests.get(url, params=params, headers=HEADERS, timeout=15)
+    except requests.exceptions.RequestException as e:
+        print("[!] Ошибка соединения: {}: {}".format(type(e).__name__, e))
+        return None
+    if resp.status_code != 200:
+        print("[!] HTTP {}: {}".format(resp.status_code, resp.text[:200]))
+        return None
+    try:
+        return resp.json()
+    except ValueError:
+        print("[!] Не-JSON ответ: {!r}".format(resp.text[:200]))
+        return None
+
+
+def get_rates() -> dict:
+    """Возвращает {тикер: {'rate': float, 'date': 'ГГГГ-ММ-ДД'}}."""
+    data = _get_json(URL, {
+        "iss.meta": "off",
+        "securities": ",".join(RUB_TICKERS),
+    })
+    if not data:
+        return {}
+
+    result = {}
+
+    # Основной источник: marketdata (CURRENTVALUE - актуальное значение)
+    md = data.get("marketdata", {})
+    cols = md.get("columns", [])
+    for row in md.get("data", []):
+        rec = dict(zip(cols, row))
+        ticker = rec.get("SECID")
+        rate = rec.get("CURRENTVALUE") or rec.get("LASTVALUE")
+        if ticker in RUB_TICKERS and rate is not None:
+            result[ticker] = {
+                "rate": float(rate),
+                "date": (rec.get("TRADEDATE") or rec.get("SYSTIME") or "")[:10],
+            }
+
+    # Запасной: блок securities (PREVPRICE/CURRENTVALUE за прошлый день)
+    if not result:
+        sec = data.get("securities", {})
+        cols = sec.get("columns", [])
+        for row in sec.get("data", []):
+            rec = dict(zip(cols, row))
+            ticker = rec.get("SECID")
+            rate = rec.get("CURRENTVALUE") or rec.get("PREVPRICE") or rec.get("LASTVALUE")
+            if ticker in RUB_TICKERS and rate is not None:
+                result[ticker] = {
+                    "rate": float(rate),
+                    "date": rec.get("PREVDATE") or rec.get("TRADEDATE") or "",
+                }
+
+    return result
+
+
+# ---------- сохранение в Excel ----------
+
+def save_overwrite(rates: dict, path: str) -> None:
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "RUSFAR"
+    ws.append(["Тикер", "Ставка, %", "Дата значения", "Дата выгрузки"])
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    for t in RUB_TICKERS:
+        if t in rates:
+            ws.append([t, rates[t]["rate"], rates[t]["date"], now])
+    for col, w in zip("ABCD", (12, 12, 16, 20)):
+        ws.column_dimensions[col].width = w
+    wb.save(path)
+
+
+def save_append(rates: dict, path: str) -> None:
+    header = ["Дата значения", "Дата выгрузки"] + RUB_TICKERS
+    if os.path.exists(path):
+        wb = load_workbook(path)
+        ws = wb.active
+    else:
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "RUSFAR"
+        ws.append(header)
+        for col, w in zip("ABCDEFG", (16, 20, 10, 10, 10, 10, 10)):
+            ws.column_dimensions[col].width = w
+
+    value_date = next(iter(rates.values()))["date"]
+    existing = {row[0].value for row in ws.iter_rows(min_row=2, max_col=1)}
+    if value_date in existing:
+        print("Данные за {} уже есть в файле, пропускаю.".format(value_date))
+        return
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ws.append([value_date, now] + [rates.get(t, {}).get("rate") for t in RUB_TICKERS])
+    wb.save(path)
+
+
+if __name__ == "__main__":
+    rates = get_rates()
+
+    if not rates:
+        raise SystemExit("Не удалось получить данные. Проверьте вывод выше.")
+
+    print("Получены ставки RUSFAR:")
+    for t in RUB_TICKERS:
+        if t in rates:
+            print("  {:<10}: {:.2f}%  [{}]".format(t, rates[t]["rate"], rates[t]["date"]))
+
+    os.makedirs(os.path.dirname(EXCEL_PATH), exist_ok=True)
+    if APPEND_MODE:
+        save_append(rates, EXCEL_PATH)
+    else:
+        save_overwrite(rates, EXCEL_PATH)
+    print("\nСохранено в: {}".format(EXCEL_PATH))
