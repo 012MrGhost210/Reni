@@ -3,6 +3,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 import os
 import requests
+import io
 from openpyxl import Workbook, load_workbook
 
 # ============ НАСТРОЙКИ ПУТЕЙ ============
@@ -16,6 +17,7 @@ SHEET_MORE_7 = "Срок больше 7 дней"
 SHEET_RUSFAR = "Rusfar"
 SHEET_BANK = "Банк"
 SHEET_DEALS = "Депозиты и репо"
+SHEET_REPO = "Репо"  # Новый лист для всех сделок репо
 
 # ============ НАСТРОЙКИ RUSFAR API ============
 RUB_TICKERS = ["RUSFAR", "RUSFAR1W", "RUSFAR2W", "RUSFAR1M", "RUSFAR3M"]
@@ -146,6 +148,30 @@ def load_sheet_data(file_path, sheet_name):
         st.error(f"Ошибка загрузки листа '{sheet_name}': {e}")
         return None
 
+def load_repo_deals(file_path, sheet_name):
+    """
+    Загружает сделки репо из листа "Репо".
+    Возвращает DataFrame со всеми данными.
+    """
+    try:
+        df = pd.read_excel(file_path, sheet_name=sheet_name)
+        
+        # Проверяем, что есть колонка A (дата размещения)
+        if df.columns[0] != 'Дата размещения':
+            # Если название отличается, переименовываем первую колонку
+            df.rename(columns={df.columns[0]: 'Дата размещения'}, inplace=True)
+        
+        # Проверяем, что есть колонка H (ставка)
+        if len(df.columns) >= 8:
+            # Переименовываем 8-ю колонку (индекс 7) в 'Ставка'
+            df.rename(columns={df.columns[7]: 'Ставка'}, inplace=True)
+        
+        return df
+        
+    except Exception as e:
+        st.error(f"Ошибка загрузки листа '{sheet_name}': {e}")
+        return None
+
 def load_deals_from_row16(file_path, sheet_name):
     """
     Загружает сделки из файла CF, начиная с 16 строки и заканчивая 19 строкой.
@@ -176,39 +202,6 @@ def load_deals_from_row16(file_path, sheet_name):
         st.error(f"Ошибка загрузки сделок из CF: {e}")
         return None
 
-def load_last_repo_deals(file_path):
-    """
-    Загружает последние сделки репо из основного файла.
-    Берёт данные из листа "Срок меньше 7" или "Срок больше 7 дней".
-    """
-    try:
-        # Пробуем загрузить из "Срок меньше 7"
-        df_less = load_sheet_data(file_path, "Срок меньше 7")
-        df_more = load_sheet_data(file_path, "Срок больше 7 дней")
-        
-        # Объединяем оба листа
-        if df_less is not None and not df_less.empty:
-            df_less['Источник'] = 'Срок меньше 7'
-        if df_more is not None and not df_more.empty:
-            df_more['Источник'] = 'Срок больше 7 дней'
-        
-        # Объединяем
-        dfs = []
-        if df_less is not None and not df_less.empty:
-            dfs.append(df_less)
-        if df_more is not None and not df_more.empty:
-            dfs.append(df_more)
-        
-        if not dfs:
-            return None
-        
-        df_combined = pd.concat(dfs, ignore_index=True)
-        return df_combined
-        
-    except Exception as e:
-        st.error(f"Ошибка загрузки последних сделок репо: {e}")
-        return None
-
 def get_bank_rate(df, column_name):
     """Получает значение ставки банка из указанной колонки"""
     if df is None or df.empty:
@@ -228,27 +221,42 @@ def format_rate(value):
     return str(value)
 
 def get_today_deal(df_deals, is_short_term=True):
-    """Находит сделку на сегодня из данных сделок (из CF)"""
+    """
+    Находит сделку из данных сделок (из CF).
+    Сначала ищет на сегодня, если нет - берёт последнюю.
+    is_short_term: True - ищем с разницей < 7 дней, False - >= 7 дней
+    """
     if df_deals is None or df_deals.empty:
         return None
     
     today = datetime.now().date()
     
-    date_start_col = df_deals.columns[2]
-    date_end_col = df_deals.columns[3]
+    date_start_col = df_deals.columns[2]  # G - дата размещения
+    date_end_col = df_deals.columns[3]    # H - дата окончания
     
     df_deals[date_start_col] = pd.to_datetime(df_deals[date_start_col], errors='coerce')
     df_deals[date_end_col] = pd.to_datetime(df_deals[date_end_col], errors='coerce')
     
     df_valid = df_deals.dropna(subset=[date_start_col, date_end_col])
-    df_today = df_valid[df_valid[date_start_col].dt.date == today]
     
-    if df_today.empty:
+    if df_valid.empty:
         return None
     
-    for idx, row in df_today.iterrows():
+    # Сортируем по дате размещения (от новых к старым)
+    df_valid = df_valid.sort_values(by=date_start_col, ascending=False)
+    
+    # Сначала проверяем сделки на сегодня
+    for idx, row in df_valid.iterrows():
+        if row[date_start_col].date() == today:
+            delta = (row[date_end_col] - row[date_start_col]).days
+            if is_short_term and delta < 7:
+                return row
+            elif not is_short_term and delta >= 7:
+                return row
+    
+    # Если не нашли на сегодня - берём последнюю подходящую
+    for idx, row in df_valid.iterrows():
         delta = (row[date_end_col] - row[date_start_col]).days
-        
         if is_short_term and delta < 7:
             return row
         elif not is_short_term and delta >= 7:
@@ -306,9 +314,6 @@ def main():
     df_cf_deals = None
     if os.path.exists(FILE_PATH_DEALS):
         df_cf_deals = load_deals_from_row16(FILE_PATH_DEALS, SHEET_DEALS)
-    
-    # Загружаем последние сделки репо из основного файла
-    df_repo_deals = load_last_repo_deals(FILE_PATH_MAIN)
     
     # ============================================
     # ПЕРЕКЛЮЧАТЕЛЬ
@@ -445,21 +450,102 @@ def main():
                 st.info("Нет данных по сделкам в файле CF")
     
     # ============================================
-    # ИСТОРИЧЕСКИЕ ДАННЫЕ (из основного файла)
+    # ВСЕ СДЕЛКИ РЕПО (из листа "Репо")
     # ============================================
     
-    with st.expander("📊 Последние сделки репо"):
-        if df_repo_deals is not None and not df_repo_deals.empty:
-            display_df = df_repo_deals.copy()
-            for col in display_df.columns:
-                if 'дата' in str(col).lower() or 'date' in str(col).lower():
-                    display_df[col] = pd.to_datetime(display_df[col]).dt.strftime('%d.%m.%Y')
-                if 'ставк' in str(col).lower() or 'rate' in str(col).lower():
-                    display_df[col] = display_df[col].apply(format_rate)
-            st.dataframe(display_df, use_container_width=True, hide_index=True)
-            st.caption(f"📊 Всего записей: {len(display_df)}")
+    with st.expander("📊 Все сделки репо"):
+        # Загружаем данные из листа "Репо"
+        df_repo = load_repo_deals(FILE_PATH_MAIN, SHEET_REPO)
+        
+        if df_repo is not None and not df_repo.empty:
+            # Проверяем, что есть колонка с датой размещения
+            if 'Дата размещения' in df_repo.columns:
+                # Приводим дату к datetime
+                df_repo['Дата размещения'] = pd.to_datetime(df_repo['Дата размещения'], errors='coerce')
+                
+                # Удаляем строки с пустой датой
+                df_repo = df_repo.dropna(subset=['Дата размещения'])
+                
+                if not df_repo.empty:
+                    # Выбор даты для фильтрации
+                    min_date = df_repo['Дата размещения'].min().date()
+                    max_date = df_repo['Дата размещения'].max().date()
+                    
+                    st.caption(f"📅 Доступные даты: с {min_date.strftime('%d.%m.%Y')} по {max_date.strftime('%d.%m.%Y')}")
+                    
+                    # Показываем все даты для выбора (сортируем по убыванию)
+                    all_dates = sorted(df_repo['Дата размещения'].dt.date.unique(), reverse=True)
+                    
+                    # Выбор даты
+                    selected_date = st.selectbox(
+                        "Выберите дату размещения (или 'Все'):",
+                        options=["Все"] + [d.strftime('%d.%m.%Y') for d in all_dates],
+                        index=0,
+                        key="repo_date_filter"
+                    )
+                    
+                    # Фильтруем по выбранной дате
+                    if selected_date != "Все":
+                        selected_date_obj = datetime.strptime(selected_date, '%d.%m.%Y').date()
+                        df_filtered = df_repo[df_repo['Дата размещения'].dt.date == selected_date_obj].copy()
+                    else:
+                        df_filtered = df_repo.copy()
+                    
+                    if not df_filtered.empty:
+                        # Сортируем по дате (свежие сверху)
+                        df_filtered = df_filtered.sort_values(by='Дата размещения', ascending=False)
+                        
+                        # Форматируем даты для отображения
+                        df_display = df_filtered.copy()
+                        df_display['Дата размещения'] = df_display['Дата размещения'].dt.strftime('%d.%m.%Y')
+                        
+                        # Форматируем ставку (колонка H - 8-я, индекс 7)
+                        if len(df_display.columns) >= 8:
+                            rate_col = df_display.columns[7]  # H - ставка
+                            df_display[rate_col] = df_display[rate_col].apply(format_rate)
+                        
+                        # Показываем таблицу
+                        st.dataframe(
+                            df_display,
+                            use_container_width=True,
+                            hide_index=True
+                        )
+                        
+                        st.caption(f"✅ Показано записей: {len(df_filtered)}")
+                        
+                        # ============================================
+                        # КНОПКА СКАЧИВАНИЯ
+                        # ============================================
+                        
+                        # Подготавливаем данные для скачивания (с исходными значениями, без форматирования)
+                        df_download = df_filtered.copy()
+                        
+                        # Создаем Excel-файл в памяти
+                        output = io.BytesIO()
+                        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                            df_download.to_excel(writer, sheet_name='Репо', index=False)
+                        excel_data = output.getvalue()
+                        
+                        # Кнопка скачивания
+                        st.download_button(
+                            label="📥 Скачать таблицу (Excel)",
+                            data=excel_data,
+                            file_name=f"Сделки_репо_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            use_container_width=True
+                        )
+                        
+                    else:
+                        st.info("Нет данных за выбранную дату")
+                else:
+                    st.info("Нет данных с корректными датами")
+            else:
+                st.warning("В листе 'Репо' нет колонки 'Дата размещения'")
+                st.write("Доступные колонки:", list(df_repo.columns))
         else:
-            st.info("Нет данных по сделкам репо в основном файле")
+            st.info(f"Нет данных в листе '{SHEET_REPO}'")
+            st.caption(f"📁 Файл: `{os.path.basename(FILE_PATH_MAIN)}`")
+            st.caption(f"📁 Лист: `{SHEET_REPO}`")
     
     # Кнопка обновления всех данных
     st.markdown("---")
