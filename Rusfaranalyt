@@ -2,10 +2,13 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
 import os
+import requests
+from openpyxl import Workbook, load_workbook
 
-# !!! УКАЖИ ПУТИ К ФАЙЛАМ !!!
-FILE_PATH_MAIN = r"C:\Users\YourName\Desktop\Русфар аналитика.xlsx"
-FILE_PATH_DEALS = r"C:\Users\YourName\Desktop\Депозиты_и_репо.xlsx"
+# ============ НАСТРОЙКИ ПУТЕЙ ============
+FILE_PATH_MAIN = r"C:\Users\YourName\Desktop\Русфар аналитика.xlsx"  # Основной файл со ставками
+FILE_PATH_DEALS = r"C:\Users\YourName\Desktop\Депозиты_и_репо.xlsx"  # Файл с действующими сделками
+FILE_PATH_RUSFAR = r"\\fs-01.renlife.com\alldocs\Финансовый департамент\Treasury\Базы данных(автоматизация)\DI_DATABASE\rusfar.xlsx"  # Файл для RUSFAR
 
 # Названия листов
 SHEET_LESS_7 = "Срок меньше 7"
@@ -13,6 +16,130 @@ SHEET_MORE_7 = "Срок больше 7 дней"
 SHEET_RUSFAR = "Rusfar"
 SHEET_BANK = "Банк"
 SHEET_DEALS = "Депозиты и репо"
+
+# ============ НАСТРОЙКИ RUSFAR API ============
+RUB_TICKERS = ["RUSFAR", "RUSFAR1W", "RUSFAR2W", "RUSFAR1M", "RUSFAR3M"]
+URL = "https://iss.moex.com/iss/engines/stock/markets/index/boards/MMIX/securities.json"
+
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                  "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36",
+    "Accept": "application/json",
+}
+
+# ============ ФУНКЦИИ ДЛЯ RUSFAR API ============
+
+def _get_json(url: str, params: dict):
+    try:
+        resp = requests.get(url, params=params, headers=HEADERS, timeout=15)
+    except requests.exceptions.RequestException as e:
+        st.error(f"Ошибка соединения с API Мосбиржи: {e}")
+        return None
+    if resp.status_code != 200:
+        st.error(f"HTTP {resp.status_code}: {resp.text[:200]}")
+        return None
+    try:
+        return resp.json()
+    except ValueError:
+        st.error(f"Не-JSON ответ: {resp.text[:200]}")
+        return None
+
+def get_rates_from_api():
+    """Получает ставки RUSFAR через API Мосбиржи"""
+    data = _get_json(URL, {
+        "iss.meta": "off",
+        "securities": ",".join(RUB_TICKERS),
+    })
+    if not data:
+        return {}
+
+    result = {}
+
+    # Основной источник: marketdata
+    md = data.get("marketdata", {})
+    cols = md.get("columns", [])
+    for row in md.get("data", []):
+        rec = dict(zip(cols, row))
+        ticker = rec.get("SECID")
+        rate = rec.get("CURRENTVALUE") or rec.get("LASTVALUE")
+        if ticker in RUB_TICKERS and rate is not None:
+            result[ticker] = {
+                "rate": float(rate),
+                "date": (rec.get("TRADEDATE") or rec.get("SYSTIME") or "")[:10],
+            }
+
+    # Запасной: securities
+    if not result:
+        sec = data.get("securities", {})
+        cols = sec.get("columns", [])
+        for row in sec.get("data", []):
+            rec = dict(zip(cols, row))
+            ticker = rec.get("SECID")
+            rate = rec.get("CURRENTVALUE") or rec.get("PREVPRICE") or rec.get("LASTVALUE")
+            if ticker in RUB_TICKERS and rate is not None:
+                result[ticker] = {
+                    "rate": float(rate),
+                    "date": rec.get("PREVDATE") or rec.get("TRADEDATE") or "",
+                }
+
+    return result
+
+def save_rusfar_to_excel(rates: dict, path: str):
+    """Сохраняет ставки RUSFAR в Excel-файл"""
+    try:
+        # Создаем папку, если её нет
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        
+        header = ["Дата значения", "Дата выгрузки"] + RUB_TICKERS
+        
+        if os.path.exists(path):
+            wb = load_workbook(path)
+            ws = wb.active
+        else:
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "RUSFAR"
+            ws.append(header)
+            for col, w in zip("ABCDEFG", (16, 20, 10, 10, 10, 10, 10)):
+                ws.column_dimensions[col].width = w
+
+        value_date = next(iter(rates.values()))["date"]
+        existing = {str(row[0].value) for row in ws.iter_rows(min_row=2, max_col=1) if row[0].value}
+        
+        if value_date in existing:
+            st.info(f"Данные за {value_date} уже есть в файле")
+        else:
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            ws.append([value_date, now] + [rates.get(t, {}).get("rate") for t in RUB_TICKERS])
+            wb.save(path)
+            st.success(f"✅ Данные RUSFAR сохранены в файл")
+            
+    except Exception as e:
+        st.error(f"Ошибка сохранения RUSFAR: {e}")
+
+def load_rusfar_from_excel(path: str):
+    """Загружает последние значения RUSFAR из Excel-файла"""
+    try:
+        if not os.path.exists(path):
+            return None, None
+        
+        df = pd.read_excel(path, sheet_name=0)
+        if df.empty:
+            return None, None
+        
+        # Берем последнюю строку
+        last_row = df.iloc[-1]
+        
+        rusfar = last_row.get('RUSFAR', None)
+        rusfar1w = last_row.get('RUSFAR1W', None)
+        
+        return rusfar, rusfar1w
+        
+    except Exception as e:
+        st.error(f"Ошибка загрузки RUSFAR из файла: {e}")
+        return None, None
+
+# ============ ОСНОВНЫЕ ФУНКЦИИ ============
 
 def load_sheet_data(file_path, sheet_name):
     """Загружает данные из указанного листа"""
@@ -29,33 +156,22 @@ def load_deals_from_row16(file_path, sheet_name):
     Заголовки в строке 16, данные в строках 17-19.
     """
     try:
-        # Загружаем весь лист без заголовков
         df_raw = pd.read_excel(file_path, sheet_name=sheet_name, header=None)
         
-        # Проверяем, что в файле достаточно строк
         if len(df_raw) < 16:
             st.warning(f"В файле меньше 16 строк. Найдено: {len(df_raw)}")
             return None
         
-        # Заголовки - строка 16 (индекс 15)
         headers_row = df_raw.iloc[15]
-        
-        # Данные ТОЛЬКО со строк 17-19 (индексы 16, 17, 18)
-        # Но не дальше 19 строки
-        max_row = min(19, len(df_raw))  # Берем до 19 строки или до конца файла
+        max_row = min(19, len(df_raw))
         data_rows = df_raw.iloc[16:max_row].copy()
-        
-        # Назначаем заголовки
         data_rows.columns = headers_row
         
-        # Оставляем только нужные колонки: E, F, G, H (индексы 4,5,6,7)
         cols_to_keep = [4, 5, 6, 7]
         col_names = [headers_row.iloc[i] for i in cols_to_keep]
         
         df_result = data_rows.iloc[:, cols_to_keep].copy()
         df_result.columns = col_names
-        
-        # Удаляем строки, где все значения пустые
         df_result = df_result.dropna(how='all')
         
         return df_result
@@ -64,8 +180,8 @@ def load_deals_from_row16(file_path, sheet_name):
         st.error(f"Ошибка загрузки сделок: {e}")
         return None
 
-def get_rusfar_value(df, column_name):
-    """Получает значение RUSFAR из указанной колонки"""
+def get_bank_rate(df, column_name):
+    """Получает значение ставки банка из указанной колонки"""
     if df is None or df.empty:
         return None
     last_row = df.iloc[-1]
@@ -76,62 +192,50 @@ def format_rate(value):
     if value is None or pd.isna(value):
         return "—"
     if isinstance(value, (int, float)):
-        if value < 1:  # Если значение в долях (0.145)
+        if value < 1:
             return f"{value * 100:.2f}%"
-        else:  # Если уже в процентах (14.5)
+        else:
             return f"{value:.2f}%"
     return str(value)
 
 def get_today_deal(df_deals, is_short_term=True):
-    """
-    Находит сделку на сегодня из данных сделок.
-    is_short_term: True - ищем с разницей < 7 дней, False - >= 7 дней
-    """
+    """Находит сделку на сегодня из данных сделок"""
     if df_deals is None or df_deals.empty:
         return None
     
-    # Получаем сегодняшнюю дату
     today = datetime.now().date()
     
-    # Находим колонки с датами (G и H - 3-я и 4-я колонки в нашем DataFrame)
-    date_start_col = df_deals.columns[2]  # G - дата размещения
-    date_end_col = df_deals.columns[3]    # H - дата окончания
+    date_start_col = df_deals.columns[2]
+    date_end_col = df_deals.columns[3]
     
-    # Приводим даты к datetime
     df_deals[date_start_col] = pd.to_datetime(df_deals[date_start_col], errors='coerce')
     df_deals[date_end_col] = pd.to_datetime(df_deals[date_end_col], errors='coerce')
     
-    # Оставляем только строки с валидными датами
     df_valid = df_deals.dropna(subset=[date_start_col, date_end_col])
-    
-    # Находим сделки на сегодня
     df_today = df_valid[df_valid[date_start_col].dt.date == today]
     
     if df_today.empty:
         return None
     
-    # Для каждой сделки считаем разницу в днях
     for idx, row in df_today.iterrows():
         delta = (row[date_end_col] - row[date_start_col]).days
         
-        # Проверяем соответствие длительности
         if is_short_term and delta < 7:
             return row
         elif not is_short_term and delta >= 7:
             return row
     
-    # Если не нашли подходящую сделку
     return None
 
+# ============ ОСНОВНОЕ ПРИЛОЖЕНИЕ ============
+
 def main():
-    # Настройка страницы
     st.set_page_config(
         page_title="Аналитика ставок",
         page_icon="📊",
         layout="wide"
     )
     
-    # Заголовок
     st.title("📊 Аналитика ставок")
     st.markdown("---")
     
@@ -141,10 +245,43 @@ def main():
         return
     
     # ============================================
-    # ОСНОВНАЯ ЧАСТЬ - ставки и индикаторы
+    # ОБНОВЛЕНИЕ RUSFAR ПО КНОПКЕ
     # ============================================
     
-    # Переключатель
+    col_btn1, col_btn2 = st.columns([1, 3])
+    
+    with col_btn1:
+        if st.button("🔄 Обновить RUSFAR", use_container_width=True):
+            with st.spinner("Запрос данных RUSFAR с Мосбиржи..."):
+                rates = get_rates_from_api()
+                if rates:
+                    save_rusfar_to_excel(rates, FILE_PATH_RUSFAR)
+                    st.session_state['rusfar_updated'] = True
+                    st.success("✅ Данные RUSFAR обновлены!")
+                else:
+                    st.error("❌ Не удалось получить данные RUSFAR")
+    
+    # ============================================
+    # ЗАГРУЗКА ДАННЫХ
+    # ============================================
+    
+    # Загружаем RUSFAR из Excel-файла
+    rusfar_value, rusfar1w_value = load_rusfar_from_excel(FILE_PATH_RUSFAR)
+    
+    # Загружаем данные банка
+    df_bank = load_sheet_data(FILE_PATH_MAIN, SHEET_BANK)
+    bank_day = get_bank_rate(df_bank, "Ставка на день")
+    bank_week = get_bank_rate(df_bank, "Ставка на неделю")
+    
+    # Загружаем сделки
+    df_active_deals = None
+    if os.path.exists(FILE_PATH_DEALS):
+        df_active_deals = load_deals_from_row16(FILE_PATH_DEALS, SHEET_DEALS)
+    
+    # ============================================
+    # ПЕРЕКЛЮЧАТЕЛЬ
+    # ============================================
+    
     option = st.radio(
         "Выбери индикатор:",
         ["RUSFAR (1 день)", "RUSFAR 1W (7 дней)"],
@@ -154,34 +291,22 @@ def main():
     
     # Определяем, какие данные показывать
     if option == "RUSFAR (1 день)":
-        rusfar_column = "RUSFAR"
-        bank_column = "Ставка на день"
+        rusfar_display = rusfar_value
+        bank_display = bank_day
         title = "овернайт"
         is_short_term = True
+        rusfar_label = "RUSFAR"
     else:
-        rusfar_column = "RUSFAR1W"
-        bank_column = "Ставка на неделю"
+        rusfar_display = rusfar1w_value
+        bank_display = bank_week
         title = "7-дневная"
         is_short_term = False
-    
-    # Загружаем данные из основного файла
-    df_rusfar = load_sheet_data(FILE_PATH_MAIN, SHEET_RUSFAR)
-    df_bank = load_sheet_data(FILE_PATH_MAIN, SHEET_BANK)
-    
-    # Загружаем сделки из файла с депозитами
-    df_active_deals = None
-    if os.path.exists(FILE_PATH_DEALS):
-        df_active_deals = load_deals_from_row16(FILE_PATH_DEALS, SHEET_DEALS)
-    
-    # Получаем значения RUSFAR и банка
-    rusfar_value = get_rusfar_value(df_rusfar, rusfar_column)
-    bank_rate = get_rusfar_value(df_bank, bank_column)
+        rusfar_label = "RUSFAR1W"
     
     # Получаем сегодняшнюю сделку
     today_deal = get_today_deal(df_active_deals, is_short_term)
     
     if today_deal is not None:
-        # Ставка в колонке F (вторая, индекс 1)
         rate_col = None
         for col in df_active_deals.columns:
             if 'ставк' in str(col).lower() or 'rate' in str(col).lower():
@@ -208,27 +333,31 @@ def main():
             delta=None
         )
         if today_deal is not None:
-            # Показываем дату сделки
-            date_start = today_deal.iloc[2]  # G - дата размещения
-            date_end = today_deal.iloc[3]    # H - дата окончания
+            date_start = today_deal.iloc[2]
+            date_end = today_deal.iloc[3]
             st.caption(f"📅 {pd.to_datetime(date_start).strftime('%d.%m.%Y')} → {pd.to_datetime(date_end).strftime('%d.%m.%Y')}")
     
     with col2:
         st.metric(
-            label=f"📈 {rusfar_column}",
-            value=format_rate(rusfar_value),
+            label=f"📈 {rusfar_label}",
+            value=format_rate(rusfar_display),
             delta=None
         )
-        # Показываем дату RUSFAR
-        if df_rusfar is not None and not df_rusfar.empty:
-            last_date = df_rusfar.iloc[-1].get('Дата выгрузки', None)
-            if last_date:
-                st.caption(f"📅 {pd.to_datetime(last_date).strftime('%d.%m.%Y')}")
+        # Показываем дату из файла RUSFAR
+        if os.path.exists(FILE_PATH_RUSFAR):
+            try:
+                df_rusfar = pd.read_excel(FILE_PATH_RUSFAR, sheet_name=0)
+                if not df_rusfar.empty:
+                    last_date = df_rusfar.iloc[-1].get('Дата значения', None)
+                    if last_date:
+                        st.caption(f"📅 {pd.to_datetime(last_date).strftime('%d.%m.%Y')}")
+            except:
+                pass
     
     with col3:
         st.metric(
-            label=f"🏦 Ставка банка ({bank_column})",
-            value=format_rate(bank_rate),
+            label=f"🏦 Ставка банка ({title})",
+            value=format_rate(bank_display),
             delta=None
         )
         # Показываем дату банка
@@ -246,7 +375,6 @@ def main():
     with st.expander("📋 Действующие сделки", expanded=False):
         if not os.path.exists(FILE_PATH_DEALS):
             st.warning(f"⚠️ Файл со сделками не найден:\n`{FILE_PATH_DEALS}`")
-            st.info("Укажи правильный путь в переменной `FILE_PATH_DEALS`")
         else:
             if df_active_deals is not None and not df_active_deals.empty:
                 date_end_col = df_active_deals.columns[3]
@@ -260,11 +388,10 @@ def main():
                 ].copy()
                 
                 if not df_filtered.empty:
-                    # Показываем E, F, H (E - индекс 0, F - индекс 1, H - индекс 3)
                     cols_to_display = [
-                        df_filtered.columns[0],  # E
-                        df_filtered.columns[1],  # F - СТАВКА
-                        df_filtered.columns[3]   # H - дата окончания
+                        df_filtered.columns[0],
+                        df_filtered.columns[1],
+                        df_filtered.columns[3]
                     ]
                     df_display = df_filtered[cols_to_display].copy()
                     
@@ -272,7 +399,6 @@ def main():
                         if 'дата' in str(col).lower() or 'date' in str(col).lower():
                             df_display[col] = pd.to_datetime(df_display[col]).dt.strftime('%d.%m.%Y')
                     
-                    # Форматируем ставку (вторая колонка)
                     rate_col_display = df_display.columns[1]
                     df_display[rate_col_display] = df_display[rate_col_display].apply(format_rate)
                     
@@ -304,7 +430,7 @@ def main():
         else:
             st.info("Нет данных по сделкам репо")
     
-    # Кнопка обновления
+    # Кнопка обновления всех данных
     st.markdown("---")
     if st.button("🔄 Обновить все данные", use_container_width=True):
         st.rerun()
@@ -312,6 +438,7 @@ def main():
     # Информация о файлах
     st.caption(f"📁 Основной файл: `{os.path.basename(FILE_PATH_MAIN)}`")
     st.caption(f"📁 Файл со сделками: `{os.path.basename(FILE_PATH_DEALS)}`")
+    st.caption(f"📁 Файл RUSFAR: `{os.path.basename(FILE_PATH_RUSFAR)}`")
 
 if __name__ == "__main__":
     main()
