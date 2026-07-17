@@ -521,6 +521,127 @@ def main():
         else:
             st.info(f"Нет данных в листе '{SHEET_REPO}'")
     
+    # ============================================
+    # ДОБАВЛЕНИЕ НОВОЙ СДЕЛКИ РЕПО
+    # ============================================
+    
+    with st.expander("➕ Новая сделка репо", expanded=False):
+        st.subheader("Ввод новой сделки")
+        
+        # Путь к файлу для записей
+        REPO_LOGS_PATH = os.path.join(os.path.dirname(FILE_PATH_MAIN), "Сделки_репо_логи.xlsx")
+        
+        # Форма для ввода данных
+        with st.form(key="new_repo_form"):
+            col_form1, col_form2 = st.columns(2)
+            
+            with col_form1:
+                deal_date = st.date_input(
+                    "📅 Дата размещения",
+                    value=datetime.now().date(),
+                    key="deal_date"
+                )
+                
+                amount = st.number_input(
+                    "💰 Сумма (млн)",
+                    min_value=0.0,
+                    step=0.1,
+                    format="%.1f",
+                    key="amount"
+                )
+            
+            with col_form2:
+                rate = st.number_input(
+                    "💹 Ставка (%)",
+                    min_value=0.0,
+                    max_value=100.0,
+                    step=0.01,
+                    format="%.2f",
+                    key="rate"
+                )
+                
+                term = st.number_input(
+                    "📅 Срок (дней)",
+                    min_value=1,
+                    step=1,
+                    key="term"
+                )
+            
+            # Дата окончания рассчитывается автоматически
+            end_date = deal_date + timedelta(days=term)
+            st.caption(f"📅 Дата окончания: **{end_date.strftime('%d.%m.%Y')}**")
+            
+            # Кнопка отправки
+            submitted = st.form_submit_button("💾 Сохранить сделку", use_container_width=True)
+            
+            if submitted:
+                if rate <= 0:
+                    st.error("❌ Ставка должна быть больше 0")
+                elif amount <= 0:
+                    st.error("❌ Сумма должна быть больше 0")
+                else:
+                    try:
+                        new_row = pd.DataFrame({
+                            'Дата размещения': [deal_date],
+                            'Сумма (млн)': [amount],
+                            'Ставка (%)': [rate],
+                            'Срок (дней)': [term],
+                            'Дата окончания': [end_date],
+                            'Дата создания': [datetime.now()]
+                        })
+                        
+                        if os.path.exists(REPO_LOGS_PATH):
+                            df_existing = pd.read_excel(REPO_LOGS_PATH, sheet_name=0)
+                            df_combined = pd.concat([df_existing, new_row], ignore_index=True)
+                        else:
+                            df_combined = new_row
+                        
+                        with pd.ExcelWriter(REPO_LOGS_PATH, engine='openpyxl') as writer:
+                            df_combined.to_excel(writer, sheet_name='Сделки', index=False)
+                        
+                        st.success(f"✅ Сделка успешно сохранена!")
+                        st.balloons()
+                        
+                        st.info(f"📋 Добавлена сделка:\n"
+                               f"- Сумма: {amount} млн\n"
+                               f"- Ставка: {rate}%\n"
+                               f"- Срок: {term} дней\n"
+                               f"- Дата окончания: {end_date.strftime('%d.%m.%Y')}")
+                        
+                    except Exception as e:
+                        st.error(f"❌ Ошибка при сохранении: {e}")
+        
+        # Показываем последние записи из лога
+        if os.path.exists(REPO_LOGS_PATH):
+            try:
+                df_log = pd.read_excel(REPO_LOGS_PATH, sheet_name=0)
+                if not df_log.empty:
+                    st.subheader("📋 Последние добавленные сделки")
+                    
+                    df_log_sorted = df_log.sort_values(by='Дата создания', ascending=False).head(5)
+                    
+                    display_log = df_log_sorted.copy()
+                    for col in display_log.columns:
+                        if 'дата' in str(col).lower() or 'date' in str(col).lower():
+                            try:
+                                display_log[col] = pd.to_datetime(display_log[col]).dt.strftime('%d.%m.%Y')
+                            except:
+                                pass
+                    
+                    if 'Ставка (%)' in display_log.columns:
+                        display_log['Ставка (%)'] = display_log['Ставка (%)'].apply(
+                            lambda x: f"{x:.2f}%" if isinstance(x, (int, float)) else x
+                        )
+                    
+                    st.dataframe(
+                        display_log,
+                        use_container_width=True,
+                        hide_index=True
+                    )
+                    st.caption(f"📊 Всего записей в логе: {len(df_log)}")
+            except Exception as e:
+                st.error(f"Ошибка загрузки лога: {e}")
+    
     # Кнопка обновления всех данных
     st.markdown("---")
     if st.button("🔄 Обновить все данные", use_container_width=True):
