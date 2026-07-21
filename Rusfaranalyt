@@ -8,15 +8,10 @@ from openpyxl import Workbook, load_workbook
 
 # ============ НАСТРОЙКИ ПУТЕЙ ============
 FILE_PATH_MAIN = r"C:\Users\YourName\Desktop\Русфар аналитика.xlsx"
-FILE_PATH_DEALS = r"C:\Users\YourName\Desktop\Депозиты_и_репо.xlsx"
 FILE_PATH_RUSFAR = r"\\fs-01.renlife.com\alldocs\Финансовый департамент\Treasury\Базы данных(автоматизация)\DI_DATABASE\rusfar.xlsx"
 
 # Названия листов
-SHEET_LESS_7 = "Срок меньше 7"
-SHEET_MORE_7 = "Срок больше 7 дней"
-SHEET_RUSFAR = "Rusfar"
 SHEET_BANK = "Банк"
-SHEET_DEALS = "Депозиты и репо"
 SHEET_REPO = "Репо"
 
 # ============ НАСТРОЙКИ RUSFAR API ============
@@ -165,33 +160,6 @@ def load_repo_deals(file_path, sheet_name):
         st.error(f"Ошибка загрузки листа '{sheet_name}': {e}")
         return None
 
-def load_deals_from_row16(file_path, sheet_name):
-    """Загружает сделки из файла CF, начиная с 16 строки."""
-    try:
-        df_raw = pd.read_excel(file_path, sheet_name=sheet_name, header=None)
-        
-        if len(df_raw) < 16:
-            st.warning(f"В файле меньше 16 строк. Найдено: {len(df_raw)}")
-            return None
-        
-        headers_row = df_raw.iloc[15]
-        max_row = min(19, len(df_raw))
-        data_rows = df_raw.iloc[16:max_row].copy()
-        data_rows.columns = headers_row
-        
-        cols_to_keep = [4, 5, 6, 7]
-        col_names = [headers_row.iloc[i] for i in cols_to_keep]
-        
-        df_result = data_rows.iloc[:, cols_to_keep].copy()
-        df_result.columns = col_names
-        df_result = df_result.dropna(how='all')
-        
-        return df_result
-        
-    except Exception as e:
-        st.error(f"Ошибка загрузки сделок из CF: {e}")
-        return None
-
 def load_active_deals_from_log(file_path):
     """Загружает действующие сделки из файла логов (дата окончания >= сегодня)"""
     try:
@@ -202,15 +170,10 @@ def load_active_deals_from_log(file_path):
         if df.empty:
             return None
         
-        # Приводим дату окончания к datetime
         df['Дата окончания'] = pd.to_datetime(df['Дата окончания'], errors='coerce')
-        
-        # Удаляем строки с пустой датой
         df = df.dropna(subset=['Дата окончания'])
         
         today = datetime.now().date()
-        
-        # Фильтруем: оставляем только действующие (дата окончания >= сегодня)
         df_active = df[df['Дата окончания'].dt.date >= today].copy()
         
         return df_active
@@ -237,43 +200,63 @@ def format_rate(value):
             return f"{value:.2f}%"
     return str(value)
 
-def get_today_deal(df_deals, is_short_term=True):
+def get_weighted_avg_rate_from_log(file_path, is_short_term=True):
     """
-    Находит последнюю действующую сделку из данных сделок (из CF).
-    is_short_term: True - ищем с разницей < 7 дней, False - >= 7 дней
+    Рассчитывает средневзвешенную ставку по сегодняшним сделкам из логов.
+    is_short_term: True - берём сделки с разницей < 7 дней, False - >= 7 дней
+    Возвращает: (средневзвешенная ставка, общая сумма, количество сделок, дата, макс дата окончания)
     """
-    if df_deals is None or df_deals.empty:
-        return None
-    
-    today = datetime.now().date()
-    
-    date_start_col = df_deals.columns[2]  # G - дата размещения
-    date_end_col = df_deals.columns[3]    # H - дата окончания
-    
-    df_deals[date_start_col] = pd.to_datetime(df_deals[date_start_col], errors='coerce')
-    df_deals[date_end_col] = pd.to_datetime(df_deals[date_end_col], errors='coerce')
-    
-    # Оставляем только строки с валидными датами
-    df_valid = df_deals.dropna(subset=[date_start_col, date_end_col])
-    
-    if df_valid.empty:
-        return None
-    
-    # Сортируем по дате размещения (от новых к старым)
-    df_valid = df_valid.sort_values(by=date_start_col, ascending=False)
-    
-    # Ищем последнюю ДЕЙСТВУЮЩУЮ сделку с нужной длительностью
-    for idx, row in df_valid.iterrows():
-        # Проверяем, что сделка действующая (дата окончания >= сегодня)
-        if row[date_end_col].date() >= today:
-            delta = (row[date_end_col] - row[date_start_col]).days
-            if is_short_term and delta < 7:
-                return row
-            elif not is_short_term and delta >= 7:
-                return row
-    
-    # Если не нашли подходящую действующую сделку
-    return None
+    try:
+        if not os.path.exists(file_path):
+            return None, 0, 0, None, None
+        
+        df = pd.read_excel(file_path, sheet_name=0)
+        if df.empty:
+            return None, 0, 0, None, None
+        
+        df['Дата размещения'] = pd.to_datetime(df['Дата размещения'], errors='coerce')
+        df['Дата окончания'] = pd.to_datetime(df['Дата окончания'], errors='coerce')
+        df = df.dropna(subset=['Дата размещения', 'Дата окончания', 'Ставка (%)', 'Сумма'])
+        
+        if df.empty:
+            return None, 0, 0, None, None
+        
+        today = datetime.now().date()
+        
+        # Фильтруем сделки на сегодня
+        df_today = df[df['Дата размещения'].dt.date == today].copy()
+        
+        if df_today.empty:
+            return None, 0, 0, None, None
+        
+        # Фильтруем по длительности
+        if is_short_term:
+            df_filtered = df_today[(df_today['Дата окончания'] - df_today['Дата размещения']).dt.days < 7].copy()
+        else:
+            df_filtered = df_today[(df_today['Дата окончания'] - df_today['Дата размещения']).dt.days >= 7].copy()
+        
+        if df_filtered.empty:
+            return None, 0, 0, None, None
+        
+        # Рассчитываем средневзвешенную ставку
+        total_amount = df_filtered['Сумма'].sum()
+        weighted_sum = (df_filtered['Ставка (%)'] * df_filtered['Сумма']).sum()
+        weighted_avg_rate = weighted_sum / total_amount if total_amount > 0 else None
+        
+        # Количество сделок
+        deals_count = len(df_filtered)
+        
+        # Дата размещения (сегодня)
+        deal_date = today
+        
+        # Максимальная дата окончания среди сегодняшних сделок
+        max_end_date = df_filtered['Дата окончания'].max()
+        
+        return weighted_avg_rate, total_amount, deals_count, deal_date, max_end_date
+        
+    except Exception as e:
+        st.error(f"Ошибка расчёта средневзвешенной ставки: {e}")
+        return None, 0, 0, None, None
 
 # ============ ОСНОВНОЕ ПРИЛОЖЕНИЕ ============
 
@@ -320,16 +303,8 @@ def main():
     bank_day = get_bank_rate(df_bank, "Ставка на день")
     bank_week = get_bank_rate(df_bank, "Ставка на неделю")
     
-    # Путь к файлу логов
     REPO_LOGS_PATH = os.path.join(os.path.dirname(FILE_PATH_MAIN), "Сделки_репо_логи.xlsx")
-    
-    # Загружаем действующие сделки из логов
     df_active_deals = load_active_deals_from_log(REPO_LOGS_PATH)
-    
-    # Загружаем сделки из CF (для актуальной ставки)
-    df_cf_deals = None
-    if os.path.exists(FILE_PATH_DEALS):
-        df_cf_deals = load_deals_from_row16(FILE_PATH_DEALS, SHEET_DEALS)
     
     # ============================================
     # ПЕРЕКЛЮЧАТЕЛЬ
@@ -355,22 +330,8 @@ def main():
         is_short_term = False
         rusfar_label = "RUSFAR1W"
     
-    # Актуальная ставка по-прежнему из CF
-    today_deal = get_today_deal(df_cf_deals, is_short_term)
-    
-    if today_deal is not None:
-        rate_col = None
-        for col in df_cf_deals.columns:
-            if 'ставк' in str(col).lower() or 'rate' in str(col).lower():
-                rate_col = col
-                break
-        
-        if rate_col:
-            today_rate = today_deal[rate_col]
-        else:
-            today_rate = today_deal.iloc[1] if len(today_deal) > 1 else None
-    else:
-        today_rate = None
+    # Получаем средневзвешенную ставку по сегодняшним сделкам
+    weighted_rate, total_amount, deals_count, deal_date, max_end_date = get_weighted_avg_rate_from_log(REPO_LOGS_PATH, is_short_term)
     
     # ============================================
     # ОТОБРАЖЕНИЕ МЕТРИК
@@ -380,14 +341,13 @@ def main():
     
     with col1:
         st.metric(
-            label=f"💹 Актуальная ставка ({title})",
-            value=format_rate(today_rate),
+            label=f"💹 Сделка ({title})",
+            value=format_rate(weighted_rate),
             delta=None
         )
-        if today_deal is not None:
-            date_start = today_deal.iloc[2]
-            date_end = today_deal.iloc[3]
-            st.caption(f"📅 {pd.to_datetime(date_start).strftime('%d.%m.%Y')} → {pd.to_datetime(date_end).strftime('%d.%m.%Y')}")
+        if weighted_rate is not None and deal_date is not None:
+            st.caption(f"📅 {deal_date.strftime('%d.%m.%Y')} → {max_end_date.strftime('%d.%m.%Y') if max_end_date is not None else '—'}")
+            st.caption(f"📊 Сделок: {deals_count}, Сумма: {total_amount:.1f}")
     
     with col2:
         st.metric(
@@ -424,14 +384,12 @@ def main():
     
     with st.expander("📋 Действующие сделки", expanded=False):
         if df_active_deals is not None and not df_active_deals.empty:
-            # Форматируем для отображения
             df_display = df_active_deals.copy()
             
             for col in df_display.columns:
                 if 'дата' in str(col).lower() or 'date' in str(col).lower():
                     df_display[col] = pd.to_datetime(df_display[col]).dt.strftime('%d.%m.%Y')
             
-            # Форматируем ставку
             if 'Ставка (%)' in df_display.columns:
                 df_display['Ставка (%)'] = df_display['Ставка (%)'].apply(
                     lambda x: f"{x:.2f}%" if isinstance(x, (int, float)) else x
@@ -549,7 +507,6 @@ def main():
     with st.expander("➕ Новая сделка репо", expanded=False):
         st.subheader("Ввод новой сделки")
         
-        # Форма для ввода данных
         with st.form(key="new_repo_form"):
             col_form1, col_form2 = st.columns(2)
             
@@ -585,11 +542,9 @@ def main():
                     key="term"
                 )
             
-            # Дата окончания рассчитывается автоматически
             end_date = deal_date + timedelta(days=term)
             st.caption(f"📅 Дата окончания: **{end_date.strftime('%d.%m.%Y')}**")
             
-            # Кнопка отправки
             submitted = st.form_submit_button("💾 Сохранить сделку", use_container_width=True)
             
             if submitted:
@@ -629,7 +584,6 @@ def main():
                     except Exception as e:
                         st.error(f"❌ Ошибка при сохранении: {e}")
         
-        # Показываем последние записи из лога
         if os.path.exists(REPO_LOGS_PATH):
             try:
                 df_log = pd.read_excel(REPO_LOGS_PATH, sheet_name=0)
@@ -660,13 +614,11 @@ def main():
             except Exception as e:
                 st.error(f"Ошибка загрузки лога: {e}")
     
-    # Кнопка обновления всех данных
     st.markdown("---")
     if st.button("🔄 Обновить все данные", use_container_width=True):
         st.rerun()
     
     st.caption(f"📁 Основной файл: `{os.path.basename(FILE_PATH_MAIN)}`")
-    st.caption(f"📁 Файл со сделками (CF): `{os.path.basename(FILE_PATH_DEALS)}`")
     st.caption(f"📁 Файл RUSFAR: `{os.path.basename(FILE_PATH_RUSFAR)}`")
     st.caption(f"📁 Файл логов сделок: `{os.path.basename(REPO_LOGS_PATH)}`")
 
