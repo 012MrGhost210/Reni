@@ -1,0 +1,157 @@
+# App.py — Календарь событий Московской биржи
+import re
+import requests
+import pandas as pd
+import streamlit as st
+from datetime import date, timedelta
+
+st.set_page_config(page_title="События МосБиржи", page_icon="📅", layout="wide")
+
+HEADERS = {"User-Agent": "Mozilla/5.0 (streamlit-app)"}
+ISS_EVENTS = "https://iss.moex.com/iss/events.json"
+
+
+# ---------------- Загрузка данных ----------------
+
+@st.cache_data(ttl=900, show_spinner="Загружаю календарь событий...")
+def fetch_events(horizon_days: int = 30) -> pd.DataFrame:
+    """События от сегодня до +N дней, с пагинацией.
+    Реальная структура ISS: ['id', 'tag', 'title', 'from', 'modified_at']
+    """
+    today = pd.Timestamp(date.today())
+    limit = today + pd.Timedelta(days=horizon_days)
+    all_pages, start = [], 0
+
+    while True:
+        resp = requests.get(
+            ISS_EVENTS, params={"start": start}, headers=HEADERS, timeout=10
+        )
+        resp.raise_for_status()
+        block = resp.json()["events"]
+        if not block["data"]:
+            break
+
+        page = pd.DataFrame(block["data"], columns=block["columns"])
+        all_pages.append(page)
+
+        if len(block["data"]) < 50:  # последняя страница
+            break
+        start += len(block["data"])
+
+    if not all_pages:
+        return pd.DataFrame()
+
+    df = pd.concat(all_pages, ignore_index=True)
+    df["dt"] = pd.to_datetime(df["from"], errors="coerce")
+    df["tag"] = df["tag"].fillna("без категории")
+
+    # Только будущие события в пределах горизонта
+    df = df[(df["dt"] >= today) & (df["dt"] <= limit)]
+    return df.sort_values("dt").reset_index(drop=True)
+
+
+@st.cache_data(ttl=3600)
+def fetch_event_body(event_id: int) -> str:
+    """Полный текст события по его id (грузится лениво, кэш 1 час)."""
+    resp = requests.get(
+        f"https://iss.moex.com/iss/events/{event_id}.json",
+        headers=HEADERS,
+        timeout=10,
+    )
+    resp.raise_for_status()
+    js = resp.json()
+    key = "content" if "content" in js else next(iter(js))
+    block = js[key]
+    if not block["data"]:
+        return ""
+    row = dict(zip(block["columns"], block["data"][0]))
+    body = row.get("body") or row.get("text") or ""
+    text = re.sub(r"<[^>]+>", " ", body)   # убираем HTML-теги
+    return re.sub(r"\s+", " ", text).strip()
+
+
+# ---------------- Вспомогательные функции ----------------
+
+def day_label(d: date) -> str:
+    delta = (d - date.today()).days
+    names = {0: "Сегодня", 1: "Завтра"}
+    weekday = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"][d.weekday()]
+    return f"{names.get(delta, weekday)}, {d:%d.%m.%Y}"
+
+
+# ---------------- Интерфейс ----------------
+
+st.title("📅 Календарь событий Московской биржи")
+
+c1, c2 = st.columns([1, 2])
+with c1:
+    horizon = st.slider("Горизонт, дней", 7, 90, 30)
+with c2:
+    query = st.text_input(
+        "🔍 Поиск по названию", placeholder="аукцион, офз, размещение..."
+    )
+
+# Загрузка
+try:
+    events = fetch_events(horizon)
+except requests.RequestException as e:
+    st.error(f"Ошибка запроса к MOEX ISS: {e}")
+    st.stop()
+
+if events.empty:
+    st.info("Событий в горизонте не найдено.")
+    st.stop()
+
+# Проверка структуры данных (защита от изменений API)
+required = {"dt", "tag", "title", "id"}
+missing = required - set(events.columns)
+if missing:
+    st.error(
+        f"В данных нет ожидаемых колонок: {missing}. "
+        f"Есть: {list(events.columns)}"
+    )
+    st.stop()
+
+# Фильтр по категориям (tag)
+tags = sorted(events["tag"].unique())
+selected_tags = st.multiselect("Категории", tags, default=tags)
+events = events[events["tag"].isin(selected_tags)]
+
+# Фильтр по поиску
+if query:
+    events = events[events["title"].str.contains(query, case=False, na=False)]
+
+# Сводка
+m1, m2, m3 = st.columns(3)
+m1.metric("Всего событий", len(events))
+m2.metric("Сегодня", int((events["dt"].dt.date == date.today()).sum()))
+week_end = date.today() + timedelta(days=7)
+m3.metric("На этой неделе", int((events["dt"].dt.date <= week_end).sum()))
+
+st.divider()
+
+if events.empty:
+    st.info("Под фильтры ничего не попало.")
+    st.stop()
+
+# Лента событий по дням
+for d, group in events.groupby(events["dt"].dt.date, sort=True):
+    is_today = d == date.today()
+    st.subheader(("🔴 " if is_today else "") + day_label(d) + f" · {len(group)}")
+
+    for _, row in group.iterrows():
+        has_time = row["dt"].time() != pd.Timestamp("00:00").time()
+        time_str = f"{row['dt']:%H:%M} · " if has_time else ""
+
+        with st.expander(f"{time_str}[{row['tag']}] {row['title']}"):
+            body = fetch_event_body(row["id"])
+            st.write(body or "_Подробности недоступны_")
+            st.caption(f"Изменено: {row['modified_at']}")
+
+# Выгрузка
+st.download_button(
+    "⬇️ Скачать CSV",
+    events[["dt", "tag", "title"]].to_csv(index=False).encode("utf-8-sig"),
+    file_name=f"moex_events_{date.today():%Y%m%d}.csv",
+    mime="text/csv",
+)
