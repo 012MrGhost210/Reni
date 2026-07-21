@@ -192,6 +192,33 @@ def load_deals_from_row16(file_path, sheet_name):
         st.error(f"Ошибка загрузки сделок из CF: {e}")
         return None
 
+def load_active_deals_from_log(file_path):
+    """Загружает действующие сделки из файла логов (дата окончания >= сегодня)"""
+    try:
+        if not os.path.exists(file_path):
+            return None
+        
+        df = pd.read_excel(file_path, sheet_name=0)
+        if df.empty:
+            return None
+        
+        # Приводим дату окончания к datetime
+        df['Дата окончания'] = pd.to_datetime(df['Дата окончания'], errors='coerce')
+        
+        # Удаляем строки с пустой датой
+        df = df.dropna(subset=['Дата окончания'])
+        
+        today = datetime.now().date()
+        
+        # Фильтруем: оставляем только действующие (дата окончания >= сегодня)
+        df_active = df[df['Дата окончания'].dt.date >= today].copy()
+        
+        return df_active
+        
+    except Exception as e:
+        st.error(f"Ошибка загрузки действующих сделок из лога: {e}")
+        return None
+
 def get_bank_rate(df, column_name):
     """Получает значение ставки банка из указанной колонки"""
     if df is None or df.empty:
@@ -211,40 +238,41 @@ def format_rate(value):
     return str(value)
 
 def get_today_deal(df_deals, is_short_term=True):
-    """Находит сделку из данных сделок (из CF)."""
+    """
+    Находит последнюю действующую сделку из данных сделок (из CF).
+    is_short_term: True - ищем с разницей < 7 дней, False - >= 7 дней
+    """
     if df_deals is None or df_deals.empty:
         return None
     
     today = datetime.now().date()
     
-    date_start_col = df_deals.columns[2]
-    date_end_col = df_deals.columns[3]
+    date_start_col = df_deals.columns[2]  # G - дата размещения
+    date_end_col = df_deals.columns[3]    # H - дата окончания
     
     df_deals[date_start_col] = pd.to_datetime(df_deals[date_start_col], errors='coerce')
     df_deals[date_end_col] = pd.to_datetime(df_deals[date_end_col], errors='coerce')
     
+    # Оставляем только строки с валидными датами
     df_valid = df_deals.dropna(subset=[date_start_col, date_end_col])
     
     if df_valid.empty:
         return None
     
+    # Сортируем по дате размещения (от новых к старым)
     df_valid = df_valid.sort_values(by=date_start_col, ascending=False)
     
+    # Ищем последнюю ДЕЙСТВУЮЩУЮ сделку с нужной длительностью
     for idx, row in df_valid.iterrows():
-        if row[date_start_col].date() == today:
+        # Проверяем, что сделка действующая (дата окончания >= сегодня)
+        if row[date_end_col].date() >= today:
             delta = (row[date_end_col] - row[date_start_col]).days
             if is_short_term and delta < 7:
                 return row
             elif not is_short_term and delta >= 7:
                 return row
     
-    for idx, row in df_valid.iterrows():
-        delta = (row[date_end_col] - row[date_start_col]).days
-        if is_short_term and delta < 7:
-            return row
-        elif not is_short_term and delta >= 7:
-            return row
-    
+    # Если не нашли подходящую действующую сделку
     return None
 
 # ============ ОСНОВНОЕ ПРИЛОЖЕНИЕ ============
@@ -292,6 +320,13 @@ def main():
     bank_day = get_bank_rate(df_bank, "Ставка на день")
     bank_week = get_bank_rate(df_bank, "Ставка на неделю")
     
+    # Путь к файлу логов
+    REPO_LOGS_PATH = os.path.join(os.path.dirname(FILE_PATH_MAIN), "Сделки_репо_логи.xlsx")
+    
+    # Загружаем действующие сделки из логов
+    df_active_deals = load_active_deals_from_log(REPO_LOGS_PATH)
+    
+    # Загружаем сделки из CF (для актуальной ставки)
     df_cf_deals = None
     if os.path.exists(FILE_PATH_DEALS):
         df_cf_deals = load_deals_from_row16(FILE_PATH_DEALS, SHEET_DEALS)
@@ -320,6 +355,7 @@ def main():
         is_short_term = False
         rusfar_label = "RUSFAR1W"
     
+    # Актуальная ставка по-прежнему из CF
     today_deal = get_today_deal(df_cf_deals, is_short_term)
     
     if today_deal is not None:
@@ -383,50 +419,35 @@ def main():
     st.markdown("---")
     
     # ============================================
-    # ДЕЙСТВУЮЩИЕ СДЕЛКИ
+    # ДЕЙСТВУЮЩИЕ СДЕЛКИ (из логов)
     # ============================================
     
     with st.expander("📋 Действующие сделки", expanded=False):
-        if not os.path.exists(FILE_PATH_DEALS):
-            st.warning(f"⚠️ Файл со сделками не найден:\n`{FILE_PATH_DEALS}`")
+        if df_active_deals is not None and not df_active_deals.empty:
+            # Форматируем для отображения
+            df_display = df_active_deals.copy()
+            
+            for col in df_display.columns:
+                if 'дата' in str(col).lower() or 'date' in str(col).lower():
+                    df_display[col] = pd.to_datetime(df_display[col]).dt.strftime('%d.%m.%Y')
+            
+            # Форматируем ставку
+            if 'Ставка (%)' in df_display.columns:
+                df_display['Ставка (%)'] = df_display['Ставка (%)'].apply(
+                    lambda x: f"{x:.2f}%" if isinstance(x, (int, float)) else x
+                )
+            
+            st.dataframe(
+                df_display,
+                use_container_width=True,
+                hide_index=True
+            )
+            
+            st.caption(f"✅ Показано действующих сделок: {len(df_active_deals)}")
         else:
-            if df_cf_deals is not None and not df_cf_deals.empty:
-                date_end_col = df_cf_deals.columns[3]
-                df_cf_deals[date_end_col] = pd.to_datetime(df_cf_deals[date_end_col], errors='coerce')
-                
-                today = datetime.now().date()
-                
-                df_filtered = df_cf_deals[
-                    (df_cf_deals[date_end_col].dt.date >= today) & 
-                    (df_cf_deals[date_end_col].notna())
-                ].copy()
-                
-                if not df_filtered.empty:
-                    cols_to_display = [
-                        df_filtered.columns[0],
-                        df_filtered.columns[1],
-                        df_filtered.columns[3]
-                    ]
-                    df_display = df_filtered[cols_to_display].copy()
-                    
-                    for col in df_display.columns:
-                        if 'дата' in str(col).lower() or 'date' in str(col).lower():
-                            df_display[col] = pd.to_datetime(df_display[col]).dt.strftime('%d.%m.%Y')
-                    
-                    rate_col_display = df_display.columns[1]
-                    df_display[rate_col_display] = df_display[rate_col_display].apply(format_rate)
-                    
-                    st.dataframe(
-                        df_display,
-                        use_container_width=True,
-                        hide_index=True
-                    )
-                    
-                    st.caption(f"✅ Показано действующих сделок: {len(df_filtered)}")
-                else:
-                    st.info("Нет действующих сделок (все даты окончания прошли)")
-            else:
-                st.info("Нет данных по сделкам в файле CF")
+            st.info("Нет действующих сделок (все даты окончания прошли или лог пуст)")
+            if not os.path.exists(REPO_LOGS_PATH):
+                st.caption("📁 Файл лога ещё не создан. Добавьте первую сделку в разделе '➕ Новая сделка репо'")
     
     # ============================================
     # ВСЕ СДЕЛКИ РЕПО
@@ -528,9 +549,6 @@ def main():
     with st.expander("➕ Новая сделка репо", expanded=False):
         st.subheader("Ввод новой сделки")
         
-        # Путь к файлу для записей
-        REPO_LOGS_PATH = os.path.join(os.path.dirname(FILE_PATH_MAIN), "Сделки_репо_логи.xlsx")
-        
         # Форма для ввода данных
         with st.form(key="new_repo_form"):
             col_form1, col_form2 = st.columns(2)
@@ -543,7 +561,7 @@ def main():
                 )
                 
                 amount = st.number_input(
-                    "💰 Сумма (млн)",
+                    "💰 Сумма",
                     min_value=0.0,
                     step=0.1,
                     format="%.1f",
@@ -583,7 +601,7 @@ def main():
                     try:
                         new_row = pd.DataFrame({
                             'Дата размещения': [deal_date],
-                            'Сумма (млн)': [amount],
+                            'Сумма': [amount],
                             'Ставка (%)': [rate],
                             'Срок (дней)': [term],
                             'Дата окончания': [end_date],
@@ -603,7 +621,7 @@ def main():
                         st.balloons()
                         
                         st.info(f"📋 Добавлена сделка:\n"
-                               f"- Сумма: {amount} млн\n"
+                               f"- Сумма: {amount}\n"
                                f"- Ставка: {rate}%\n"
                                f"- Срок: {term} дней\n"
                                f"- Дата окончания: {end_date.strftime('%d.%m.%Y')}")
@@ -650,6 +668,7 @@ def main():
     st.caption(f"📁 Основной файл: `{os.path.basename(FILE_PATH_MAIN)}`")
     st.caption(f"📁 Файл со сделками (CF): `{os.path.basename(FILE_PATH_DEALS)}`")
     st.caption(f"📁 Файл RUSFAR: `{os.path.basename(FILE_PATH_RUSFAR)}`")
+    st.caption(f"📁 Файл логов сделок: `{os.path.basename(REPO_LOGS_PATH)}`")
 
 if __name__ == "__main__":
     main()
